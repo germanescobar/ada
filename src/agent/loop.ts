@@ -53,11 +53,16 @@ export class AgentLoop {
       await this.eventStore.append(session.id, "assistant_response", {
         stopReason: response.stopReason,
         content: response.content,
+        reasoning: response.reasoning,
         usage: response.usage,
       });
 
       // Append assistant response to messages
       session.messages.push({ role: "assistant", content: response.content });
+
+      if (response.reasoning) {
+        this.emit({ type: "assistant.reasoning", text: response.reasoning });
+      }
 
       // Print any text blocks
       for (const block of response.content) {
@@ -144,6 +149,9 @@ export class AgentLoop {
         return;
       case "assistant.text":
         console.log(chalk.cyan(event.text));
+        return;
+      case "assistant.reasoning":
+        console.log(chalk.magenta(event.text));
         return;
       case "tool.call":
         console.log(chalk.yellow(`→ ${event.name}(${JSON.stringify(event.input)})`));

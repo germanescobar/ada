@@ -10,6 +10,7 @@ An intelligent AI-powered coding agent that helps you write, edit, and run code.
 - **Session Management** - Resume previous conversations and track history
 - **Multi-Provider Support** - Switch between Anthropic Claude and OpenAI models
 - **Event Logging** - Track all interactions and tool executions
+- **Reasoning Capture** - Preserve provider-exposed reasoning traces when available
 - **Type-Safe** - Built with TypeScript for reliability and type safety
 
 ## Installation
@@ -121,6 +122,7 @@ Example stream:
 
 ```json
 {"type":"run.started","sessionId":"9e6f8a7d-7ff1-4c2c-b3d8-9c3ed5a1d4b7","model":"anthropic/claude-sonnet-4-6","workingDirectory":"/path/to/project","timestamp":"2026-04-09T15:00:00.000Z"}
+{"type":"assistant.reasoning","text":"I should inspect the project structure before changing files."}
 {"type":"assistant.text","text":"I added a hello world script."}
 {"type":"tool.call","id":"toolu_123","name":"write_file","input":{"path":"hello.js","content":"console.log(\"hello world\");\n"}}
 {"type":"tool.result","id":"toolu_123","name":"write_file","content":"File written successfully.","isError":false}
@@ -128,6 +130,8 @@ Example stream:
 ```
 
 Without `--stream-json`, the CLI uses the normal human-readable terminal output.
+
+When using an OpenAI-compatible backend that exposes reasoning traces, Ada will also store them in the `assistant_response` event payload as `reasoning` and emit an `assistant.reasoning` stream event.
 
 ## Publishing
 

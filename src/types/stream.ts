@@ -9,6 +9,10 @@ export type StreamEvent =
       timestamp: string;
     }
   | {
+      type: "assistant.reasoning";
+      text: string;
+    }
+  | {
       type: "assistant.text";
       text: string;
     }
