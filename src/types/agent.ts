@@ -17,5 +17,6 @@ export type StopReason = "end_turn" | "tool_use" | "max_tokens" | "error";
 export interface ModelResponse {
   stopReason: StopReason;
   content: ContentBlock[];
+  reasoning?: string;
   usage?: { inputTokens: number; outputTokens: number };
 }

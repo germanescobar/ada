@@ -41,6 +41,7 @@ export class OpenAIProvider implements ModelProvider {
     return {
       stopReason,
       content,
+      reasoning: this.extractReasoning(choice.message),
       usage: response.usage
         ? {
             inputTokens: response.usage.prompt_tokens,
@@ -157,5 +158,24 @@ export class OpenAIProvider implements ModelProvider {
     }
 
     return blocks;
+  }
+
+  private extractReasoning(
+    message: OpenAI.Chat.Completions.ChatCompletionMessage
+  ): string | undefined {
+    const reasoningMessage = message as OpenAI.Chat.Completions.ChatCompletionMessage & {
+      reasoning_content?: unknown;
+      reasoning?: unknown;
+    };
+
+    const candidate = reasoningMessage.reasoning_content ?? reasoningMessage.reasoning;
+    if (candidate == null) return undefined;
+    if (typeof candidate === "string") return candidate;
+
+    try {
+      return JSON.stringify(candidate);
+    } catch {
+      return String(candidate);
+    }
   }
 }
