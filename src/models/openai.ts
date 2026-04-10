@@ -84,9 +84,15 @@ export class OpenAIProvider implements ModelProvider {
             };
           });
 
+        // Some providers (e.g. Ollama OpenAI-compatible endpoints) reject
+        // assistant messages with null/empty content and no tool calls.
+        if (!textParts && toolCalls.length === 0) {
+          continue;
+        }
+
         result.push({
           role: "assistant",
-          content: textParts || null,
+          content: textParts || "",
           tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
         });
       } else {
