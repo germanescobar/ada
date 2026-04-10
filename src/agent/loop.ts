@@ -1,12 +1,11 @@
 import chalk from "chalk";
-import { v4 as uuidv4 } from "uuid";
 import type { ModelProvider } from "../models/provider.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { EventStore } from "../storage/event-store.js";
 import type { SessionStore } from "../storage/session-store.js";
 import type { SessionState } from "../types/agent.js";
 import type { ContentBlock, Message } from "../types/messages.js";
-import type { AgentRunResult, OutputMode, ToolCallResult } from "../types/output.js";
+import type { StreamEvent } from "../types/stream.js";
 import { ContextBuilder } from "./context-builder.js";
 import { Executor } from "./executor.js";
 
@@ -20,10 +19,10 @@ export class AgentLoop {
     private registry: ToolRegistry,
     private eventStore: EventStore,
     private sessionStore: SessionStore,
-    private outputMode: OutputMode = "default"
+    private streamJson = false
   ) {}
 
-  async run(session: SessionState, userMessage: string): Promise<AgentRunResult> {
+  async run(session: SessionState, userMessage: string): Promise<void> {
     // Append user message
     session.messages.push({ role: "user", content: userMessage });
     session.lastActiveAt = new Date().toISOString();
@@ -33,10 +32,16 @@ export class AgentLoop {
 
     const systemPrompt = await this.contextBuilder.buildSystemPrompt();
     const tools = this.registry.toSchemas();
-    const textBlocks: string[] = [];
-    const toolCalls: ToolCallResult[] = [];
     let finalStopReason = "max_iterations";
-    let status: AgentRunResult["status"] = "max_iterations";
+    let status: "completed" | "max_iterations" = "max_iterations";
+
+    this.emit({
+      type: "run.started",
+      sessionId: session.id,
+      model: session.model,
+      workingDirectory: session.workingDirectory,
+      timestamp: new Date().toISOString(),
+    });
 
     for (let i = 0; i < MAX_ITERATIONS; i++) {
       const response = await this.provider.chat({
@@ -57,10 +62,7 @@ export class AgentLoop {
       // Print any text blocks
       for (const block of response.content) {
         if (block.type === "text") {
-          textBlocks.push(block.text);
-          if (this.outputMode !== "json") {
-            console.log(chalk.cyan(block.text));
-          }
+          this.emit({ type: "assistant.text", text: block.text });
         }
       }
 
@@ -84,11 +86,12 @@ export class AgentLoop {
       const resultBlocks: ContentBlock[] = [];
 
       for (const toolUse of toolUseBlocks) {
-        if (this.outputMode === "default") {
-          console.log(
-            chalk.yellow(`→ ${toolUse.name}(${JSON.stringify(toolUse.input)})`)
-          );
-        }
+        this.emit({
+          type: "tool.call",
+          id: toolUse.id,
+          name: toolUse.name,
+          input: toolUse.input,
+        });
 
         const result = await this.executor.executeTool(session.id, {
           id: toolUse.id,
@@ -96,17 +99,10 @@ export class AgentLoop {
           input: toolUse.input,
         });
 
-        const preview = result.content.slice(0, 500);
-        if (this.outputMode === "default") {
-          console.log(
-            result.isError ? chalk.red(`  ✗ ${preview}`) : chalk.gray(`  ${preview}`)
-          );
-        }
-
-        toolCalls.push({
+        this.emit({
+          type: "tool.result",
           id: toolUse.id,
           name: toolUse.name,
-          input: toolUse.input,
           content: result.content,
           isError: Boolean(result.isError),
         });
@@ -126,17 +122,39 @@ export class AgentLoop {
     // Save session
     session.lastActiveAt = new Date().toISOString();
     await this.sessionStore.save(session);
-
-    return {
-      schemaVersion: "ada.v1",
+    this.emit({
+      type: "run.completed",
       sessionId: session.id,
-      model: session.model,
-      workingDirectory: session.workingDirectory,
       status,
-      stopReason: finalStopReason,
-      finalText: textBlocks.join("\n\n").trim(),
-      textBlocks,
-      toolCalls,
-    };
+      stopReason: finalStopReason as "end_turn" | "tool_use" | "max_tokens" | "error",
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  private emit(event: StreamEvent): void {
+    if (this.streamJson) {
+      console.log(JSON.stringify(event));
+      return;
+    }
+
+    switch (event.type) {
+      case "run.started":
+      case "run.completed":
+      case "run.failed":
+        return;
+      case "assistant.text":
+        console.log(chalk.cyan(event.text));
+        return;
+      case "tool.call":
+        console.log(chalk.yellow(`→ ${event.name}(${JSON.stringify(event.input)})`));
+        return;
+      case "tool.result": {
+        const preview = event.content.slice(0, 500);
+        console.log(
+          event.isError ? chalk.red(`  ✗ ${preview}`) : chalk.gray(`  ${preview}`)
+        );
+        return;
+      }
+    }
   }
 }

@@ -17,10 +17,8 @@ import { Executor } from "../agent/executor.js";
 import { AgentLoop } from "../agent/loop.js";
 import { SessionManager } from "../agent/session.js";
 import { createProvider } from "../models/resolve.js";
-import type { OutputMode } from "../types/output.js";
 
 const DEFAULT_MODEL = "anthropic/claude-sonnet-4-6";
-const OUTPUT_MODES: OutputMode[] = ["default", "human", "json"];
 
 function getStoragePaths(cwd: string) {
   const base = path.join(cwd, ".coding-agent");
@@ -58,7 +56,7 @@ export function createCLI() {
     .version("0.1.0")
     .option("--model <model>", "Model to use (provider/model)", DEFAULT_MODEL)
     .option("--base-url <url>", "Override provider base URL")
-    .option("--output <mode>", "Output mode: default, human, or json", "default")
+    .option("--stream-json", "Emit structured JSON events to stdout")
     .option("--auto-approve", "Auto-approve tool calls (dangerous commands are still denied)");
 
   program
@@ -67,7 +65,7 @@ export function createCLI() {
     .option("--resume <sessionId>", "Resume a previous session")
     .option("--model <model>", "Model to use (provider/model)")
     .option("--base-url <url>", "Override provider base URL")
-    .option("--output <mode>", "Output mode: default, human, or json")
+    .option("--stream-json", "Emit structured JSON events to stdout")
     .option("--auto-approve", "Auto-approve tool calls (dangerous commands are still denied)")
     .action(async (
       message: string,
@@ -76,19 +74,19 @@ export function createCLI() {
         model?: string;
         baseUrl?: string;
         autoApprove?: boolean;
-        output?: string;
+        streamJson?: boolean;
       }
     ) => {
       const parentOpts = program.opts() as {
         model: string;
         baseUrl?: string;
         autoApprove?: boolean;
-        output: string;
+        streamJson?: boolean;
       };
       const model = options.model ?? parentOpts.model;
       const baseUrl = options.baseUrl ?? parentOpts.baseUrl;
       const autoApprove = options.autoApprove ?? parentOpts.autoApprove;
-      const outputMode = parseOutputMode(options.output ?? parentOpts.output);
+      const streamJson = options.streamJson ?? parentOpts.streamJson ?? false;
       const cwd = process.cwd();
       const paths = getStoragePaths(cwd);
 
@@ -123,22 +121,31 @@ export function createCLI() {
         registry,
         eventStore,
         sessionStore,
-        outputMode
+        streamJson
       );
 
-      if (outputMode === "default") {
+      if (!streamJson) {
         console.log(chalk.gray(`Session: ${session.id}`));
         console.log(chalk.gray(`Model: ${modelString}`));
         console.log();
       }
 
       try {
-        const result = await loop.run(session, message);
-        if (outputMode === "json") {
-          console.log(JSON.stringify(result, null, 2));
-        }
+        await loop.run(session, message);
       } catch (err) {
-        console.error(chalk.red(`Error: ${(err as Error).message}`));
+        const errorMessage = (err as Error).message;
+        if (streamJson) {
+          console.log(
+            JSON.stringify({
+              type: "run.failed",
+              sessionId: session.id,
+              error: errorMessage,
+              timestamp: new Date().toISOString(),
+            })
+          );
+        } else {
+          console.error(chalk.red(`Error: ${errorMessage}`));
+        }
         process.exit(1);
       }
     });
@@ -188,14 +195,4 @@ export function createCLI() {
     });
 
   return program;
-}
-
-function parseOutputMode(value: string): OutputMode {
-  if (OUTPUT_MODES.includes(value as OutputMode)) {
-    return value as OutputMode;
-  }
-
-  throw new Error(
-    `Invalid output mode "${value}". Expected one of: ${OUTPUT_MODES.join(", ")}`
-  );
 }
