@@ -47,6 +47,14 @@ npm link
 
 After that, the `ada` command will be available in your shell.
 
+`npm link` is typically a one-time setup step for a local checkout. After changing files in `src/`, run:
+
+```bash
+npm run build
+```
+
+You only need to run `npm link` again if the package's global command setup changes, such as the package name or the `bin` mapping in `package.json`.
+
 If you don't want to install it globally, you can also run it directly from the repository with:
 
 ```bash
@@ -90,7 +98,7 @@ ada events <session-id>
 Use a different AI model:
 
 ```bash
-ada chat "Your message here" --model anthropic/claude-sonnet-4-6
+ada chat "Your message here" --model ollama/glm-4.7-flash:latest
 ```
 
 ### Custom Base URL
@@ -101,47 +109,25 @@ Connect to a custom API endpoint:
 ada chat "Your message here" --base-url https://api.example.com/v1
 ```
 
-### Output Modes
+### JSON Event Streaming
 
-The CLI supports three output modes:
-
-- `default` - Current interactive output, including assistant text and tool activity
-- `human` - Assistant text only, with tool calls hidden
-- `json` - A structured JSON result for orchestrators and automation
-
-Examples:
+Use `--stream-json` to emit one JSON event per line for machine-readable integrations:
 
 ```bash
-ada chat "Explain this repository" --output human
+ada chat "Add a hello world script" --stream-json
 ```
 
-```bash
-ada chat "Add a hello world script" --output json
-```
-
-JSON mode returns a single object with this shape:
+Example stream:
 
 ```json
-{
-  "schemaVersion": "ada.v1",
-  "sessionId": "string",
-  "model": "string",
-  "workingDirectory": "string",
-  "status": "completed | max_iterations",
-  "stopReason": "end_turn | tool_use | max_tokens | error | max_iterations",
-  "finalText": "string",
-  "textBlocks": ["string"],
-  "toolCalls": [
-    {
-      "id": "string",
-      "name": "string",
-      "input": {},
-      "content": "string",
-      "isError": false
-    }
-  ]
-}
+{"type":"run.started","sessionId":"9e6f8a7d-7ff1-4c2c-b3d8-9c3ed5a1d4b7","model":"anthropic/claude-sonnet-4-6","workingDirectory":"/path/to/project","timestamp":"2026-04-09T15:00:00.000Z"}
+{"type":"assistant.text","text":"I added a hello world script."}
+{"type":"tool.call","id":"toolu_123","name":"write_file","input":{"path":"hello.js","content":"console.log(\"hello world\");\n"}}
+{"type":"tool.result","id":"toolu_123","name":"write_file","content":"File written successfully.","isError":false}
+{"type":"run.completed","sessionId":"9e6f8a7d-7ff1-4c2c-b3d8-9c3ed5a1d4b7","status":"completed","stopReason":"end_turn","timestamp":"2026-04-09T15:00:01.000Z"}
 ```
+
+Without `--stream-json`, the CLI uses the normal human-readable terminal output.
 
 ## Publishing
 

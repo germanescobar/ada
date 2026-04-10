@@ -37,7 +37,7 @@ export const evalCases: EvalCase[] = [
   {
     name: "json-parser",
     prompt:
-      "Create a file called parse-config.js that exports a function parseConfig(filePath) which reads a JSON file and returns the parsed object. It should throw an error with the message 'File not found' if the file doesn't exist.",
+      "Create a file called parse-config.js that exports a function parseConfig(filePath) as a named export (module.exports = { parseConfig }). It should read a JSON file and return the parsed object. It should throw an error with the message 'File not found' if the file doesn't exist.",
     setupFiles: {
       "test-config.json": JSON.stringify({ host: "localhost", port: 3000 }),
     },
