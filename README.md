@@ -14,6 +14,22 @@ An intelligent AI-powered coding agent that helps you write, edit, and run code.
 
 ## Installation
 
+Install from npm:
+
+```bash
+npm install -g @germanescobar/ada
+```
+
+That installs the `ada` command globally, so users can run:
+
+```bash
+ada chat "Create a simple React component that displays a greeting"
+```
+
+## Local Development Install
+
+To install from a local checkout:
+
 ```bash
 # Clone the repository
 git clone <repository-url>
@@ -24,6 +40,17 @@ npm install
 
 # Build the project
 npm run build
+
+# Install the ada command globally from this checkout
+npm link
+```
+
+After that, the `ada` command will be available in your shell.
+
+If you don't want to install it globally, you can also run it directly from the repository with:
+
+```bash
+npm run start -- <command>
 ```
 
 ## Usage
@@ -33,13 +60,7 @@ npm run build
 Start a new conversation:
 
 ```bash
-npm run start -- chat "Create a simple React component that displays a greeting"
-```
-
-Or with development mode:
-
-```bash
-npm run dev -- chat "Create a simple React component that displays a greeting"
+ada chat "Create a simple React component that displays a greeting"
 ```
 
 ### Resume a Session
@@ -47,13 +68,13 @@ npm run dev -- chat "Create a simple React component that displays a greeting"
 Continue from a previous conversation:
 
 ```bash
-npm run start -- chat "Can you explain this code?" --resume <session-id>
+ada chat "Can you explain this code?" --resume <session-id>
 ```
 
 ### List Past Sessions
 
 ```bash
-npm run start -- sessions
+ada sessions
 ```
 
 ### View Event Logs
@@ -61,7 +82,7 @@ npm run start -- sessions
 View detailed events for a specific session:
 
 ```bash
-npm run start -- events <session-id>
+ada events <session-id>
 ```
 
 ### Custom Model
@@ -69,7 +90,7 @@ npm run start -- events <session-id>
 Use a different AI model:
 
 ```bash
-npm run start -- chat "Your message here" --model anthropic/claude-sonnet-4-6
+ada chat "Your message here" --model anthropic/claude-sonnet-4-6
 ```
 
 ### Custom Base URL
@@ -77,7 +98,67 @@ npm run start -- chat "Your message here" --model anthropic/claude-sonnet-4-6
 Connect to a custom API endpoint:
 
 ```bash
-npm run start -- chat "Your message here" --base-url https://api.example.com/v1
+ada chat "Your message here" --base-url https://api.example.com/v1
+```
+
+### Output Modes
+
+The CLI supports three output modes:
+
+- `default` - Current interactive output, including assistant text and tool activity
+- `human` - Assistant text only, with tool calls hidden
+- `json` - A structured JSON result for orchestrators and automation
+
+Examples:
+
+```bash
+ada chat "Explain this repository" --output human
+```
+
+```bash
+ada chat "Add a hello world script" --output json
+```
+
+JSON mode returns a single object with this shape:
+
+```json
+{
+  "schemaVersion": "ada.v1",
+  "sessionId": "string",
+  "model": "string",
+  "workingDirectory": "string",
+  "status": "completed | max_iterations",
+  "stopReason": "end_turn | tool_use | max_tokens | error | max_iterations",
+  "finalText": "string",
+  "textBlocks": ["string"],
+  "toolCalls": [
+    {
+      "id": "string",
+      "name": "string",
+      "input": {},
+      "content": "string",
+      "isError": false
+    }
+  ]
+}
+```
+
+## Publishing
+
+To publish the package to npm under the `@germanescobar` scope:
+
+```bash
+# Log in to npm
+npm login
+
+# Build and publish the public scoped package
+npm publish --access public
+```
+
+After publishing, users can install it with:
+
+```bash
+npm install -g @germanescobar/ada
 ```
 
 ## Architecture
@@ -176,14 +257,14 @@ Session data is stored in the `.coding-agent/` directory in your working directo
 ## Development
 
 ```bash
-# Run development mode
-npm run dev
+# Run the CLI in development mode
+npm run dev -- chat "Create a simple React component that displays a greeting"
 
 # Build for production
 npm run build
 
-# Run production build
-npm start
+# Run the built CLI without installing it globally
+npm run start -- chat "Create a simple React component that displays a greeting"
 ```
 
 ## Safety Considerations

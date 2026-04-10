@@ -17,8 +17,10 @@ import { Executor } from "../agent/executor.js";
 import { AgentLoop } from "../agent/loop.js";
 import { SessionManager } from "../agent/session.js";
 import { createProvider } from "../models/resolve.js";
+import type { OutputMode } from "../types/output.js";
 
 const DEFAULT_MODEL = "anthropic/claude-sonnet-4-6";
+const OUTPUT_MODES: OutputMode[] = ["default", "human", "json"];
 
 function getStoragePaths(cwd: string) {
   const base = path.join(cwd, ".coding-agent");
@@ -51,19 +53,42 @@ export function createCLI() {
   const program = new Command();
 
   program
-    .name("coding-agent")
+    .name("ada")
     .description("An AI coding agent")
     .version("0.1.0")
     .option("--model <model>", "Model to use (provider/model)", DEFAULT_MODEL)
     .option("--base-url <url>", "Override provider base URL")
+    .option("--output <mode>", "Output mode: default, human, or json", "default")
     .option("--auto-approve", "Auto-approve tool calls (dangerous commands are still denied)");
 
   program
     .command("chat")
     .argument("<message>", "Message to send to the agent")
     .option("--resume <sessionId>", "Resume a previous session")
-    .action(async (message: string, options: { resume?: string }) => {
-      const parentOpts = program.opts() as { model: string; baseUrl?: string; autoApprove?: boolean };
+    .option("--model <model>", "Model to use (provider/model)")
+    .option("--base-url <url>", "Override provider base URL")
+    .option("--output <mode>", "Output mode: default, human, or json")
+    .option("--auto-approve", "Auto-approve tool calls (dangerous commands are still denied)")
+    .action(async (
+      message: string,
+      options: {
+        resume?: string;
+        model?: string;
+        baseUrl?: string;
+        autoApprove?: boolean;
+        output?: string;
+      }
+    ) => {
+      const parentOpts = program.opts() as {
+        model: string;
+        baseUrl?: string;
+        autoApprove?: boolean;
+        output: string;
+      };
+      const model = options.model ?? parentOpts.model;
+      const baseUrl = options.baseUrl ?? parentOpts.baseUrl;
+      const autoApprove = options.autoApprove ?? parentOpts.autoApprove;
+      const outputMode = parseOutputMode(options.output ?? parentOpts.output);
       const cwd = process.cwd();
       const paths = getStoragePaths(cwd);
 
@@ -74,10 +99,10 @@ export function createCLI() {
       // Create or resume session
       const session = options.resume
         ? await sessionManager.resumeSession(options.resume)
-        : await sessionManager.createSession(cwd, parentOpts.model);
+        : await sessionManager.createSession(cwd, model);
 
       const modelString = session.model;
-      const provider = createProvider(modelString, { baseURL: parentOpts.baseUrl });
+      const provider = createProvider(modelString, { baseURL: baseUrl });
 
       // Set up tools
       const registry = new ToolRegistry();
@@ -89,7 +114,7 @@ export function createCLI() {
 
       const policyEngine = PolicyEngine.withDefaults();
       const contextBuilder = new ContextBuilder(cwd);
-      const approvalFn = parentOpts.autoApprove ? async () => true : askApproval;
+      const approvalFn = autoApprove ? async () => true : askApproval;
       const executor = new Executor(registry, policyEngine, eventStore, approvalFn);
       const loop = new AgentLoop(
         provider,
@@ -97,15 +122,21 @@ export function createCLI() {
         contextBuilder,
         registry,
         eventStore,
-        sessionStore
+        sessionStore,
+        outputMode
       );
 
-      console.log(chalk.gray(`Session: ${session.id}`));
-      console.log(chalk.gray(`Model: ${modelString}`));
-      console.log();
+      if (outputMode === "default") {
+        console.log(chalk.gray(`Session: ${session.id}`));
+        console.log(chalk.gray(`Model: ${modelString}`));
+        console.log();
+      }
 
       try {
-        await loop.run(session, message);
+        const result = await loop.run(session, message);
+        if (outputMode === "json") {
+          console.log(JSON.stringify(result, null, 2));
+        }
       } catch (err) {
         console.error(chalk.red(`Error: ${(err as Error).message}`));
         process.exit(1);
@@ -157,4 +188,14 @@ export function createCLI() {
     });
 
   return program;
+}
+
+function parseOutputMode(value: string): OutputMode {
+  if (OUTPUT_MODES.includes(value as OutputMode)) {
+    return value as OutputMode;
+  }
+
+  throw new Error(
+    `Invalid output mode "${value}". Expected one of: ${OUTPUT_MODES.join(", ")}`
+  );
 }
