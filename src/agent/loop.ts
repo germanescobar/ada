@@ -50,6 +50,12 @@ export class AgentLoop {
         tools,
       });
 
+      if (response.reasoning) {
+        await this.eventStore.append(session.id, "assistant_reasoning", {
+          text: response.reasoning,
+        });
+      }
+
       await this.eventStore.append(session.id, "assistant_response", {
         stopReason: response.stopReason,
         content: response.content,
