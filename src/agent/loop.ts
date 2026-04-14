@@ -26,6 +26,9 @@ export class AgentLoop {
     // Append user message
     session.messages.push({ role: "user", content: userMessage });
     session.lastActiveAt = new Date().toISOString();
+    if (!session.title) {
+      session.title = this.generateTitle(userMessage);
+    }
     await this.eventStore.append(session.id, "user_message", {
       text: userMessage,
     });
@@ -140,6 +143,13 @@ export class AgentLoop {
       stopReason: finalStopReason as "end_turn" | "tool_use" | "max_tokens" | "error",
       timestamp: new Date().toISOString(),
     });
+  }
+
+  private generateTitle(message: string): string {
+    const firstLine = message.split('\n')[0].trim();
+    if (!firstLine) return 'Chat session';
+    if (firstLine.length <= 72) return firstLine;
+    return firstLine.slice(0, 69) + '...';
   }
 
   private emit(event: StreamEvent): void {

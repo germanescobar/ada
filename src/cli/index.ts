@@ -55,7 +55,6 @@ export function createCLI() {
     .description("An AI coding agent")
     .version("0.1.0")
     .option("--model <model>", "Model to use (provider/model)", DEFAULT_MODEL)
-    .option("--base-url <url>", "Override provider base URL")
     .option("--stream-json", "Emit structured JSON events to stdout")
     .option("--auto-approve", "Auto-approve tool calls (dangerous commands are still denied)");
 
@@ -64,7 +63,6 @@ export function createCLI() {
     .argument("<message>", "Message to send to the agent")
     .option("--resume <sessionId>", "Resume a previous session")
     .option("--model <model>", "Model to use (provider/model)")
-    .option("--base-url <url>", "Override provider base URL")
     .option("--stream-json", "Emit structured JSON events to stdout")
     .option("--auto-approve", "Auto-approve tool calls (dangerous commands are still denied)")
     .action(async (
@@ -72,19 +70,16 @@ export function createCLI() {
       options: {
         resume?: string;
         model?: string;
-        baseUrl?: string;
         autoApprove?: boolean;
         streamJson?: boolean;
       }
     ) => {
       const parentOpts = program.opts() as {
         model: string;
-        baseUrl?: string;
         autoApprove?: boolean;
         streamJson?: boolean;
       };
       const model = options.model ?? parentOpts.model;
-      const baseUrl = options.baseUrl ?? parentOpts.baseUrl;
       const autoApprove = options.autoApprove ?? parentOpts.autoApprove;
       const streamJson = options.streamJson ?? parentOpts.streamJson ?? false;
       const cwd = process.cwd();
@@ -100,7 +95,7 @@ export function createCLI() {
         : await sessionManager.createSession(cwd, model);
 
       const modelString = session.model;
-      const provider = createProvider(modelString, { baseURL: baseUrl });
+      const provider = createProvider(modelString);
 
       // Set up tools
       const registry = new ToolRegistry();
@@ -126,6 +121,9 @@ export function createCLI() {
 
       if (!streamJson) {
         console.log(chalk.gray(`Session: ${session.id}`));
+        if (session.title) {
+          console.log(chalk.gray(`Title: ${session.title}`));
+        }
         console.log(chalk.gray(`Model: ${modelString}`));
         console.log();
       }
@@ -153,11 +151,12 @@ export function createCLI() {
   program
     .command("sessions")
     .description("List past sessions")
-    .action(async () => {
+    .option("--archived", "Include archived sessions")
+    .action(async (options: { archived?: boolean }) => {
       const cwd = process.cwd();
       const paths = getStoragePaths(cwd);
       const sessionStore = new SessionStore(paths.sessions);
-      const sessions = await sessionStore.list();
+      const sessions = await sessionStore.list(options.archived ?? false);
 
       if (sessions.length === 0) {
         console.log("No sessions found.");
@@ -166,9 +165,31 @@ export function createCLI() {
 
       for (const s of sessions) {
         const msgCount = s.messages.length;
+        const title = s.title ?? '(untitled)';
+        const archived = s.status === "archived" ? chalk.yellow(" [archived]") : "";
         console.log(
-          `${chalk.cyan(s.id)}  ${s.model}  ${msgCount} msgs  ${s.lastActiveAt}`
+          `${chalk.cyan(s.id.slice(0, 8))}  ${chalk.white.bold(title)}${archived}  ${chalk.gray(`${s.model}  ${msgCount} msgs  ${s.lastActiveAt}`)}`
         );
+      }
+    });
+
+  program
+    .command("archive")
+    .argument("<sessionId>", "Session ID to archive")
+    .description("Archive a session")
+    .action(async (sessionId: string) => {
+      const cwd = process.cwd();
+      const paths = getStoragePaths(cwd);
+      const eventStore = new EventStore(paths.events);
+      const sessionStore = new SessionStore(paths.sessions);
+      const sessionManager = new SessionManager(sessionStore, eventStore);
+
+      try {
+        await sessionManager.archiveSession(sessionId);
+        console.log(chalk.green(`Session ${sessionId.slice(0, 8)} archived.`));
+      } catch (err) {
+        console.error(chalk.red((err as Error).message));
+        process.exit(1);
       }
     });
 

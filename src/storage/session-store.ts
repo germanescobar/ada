@@ -25,7 +25,7 @@ export class SessionStore {
     }
   }
 
-  async list(): Promise<SessionState[]> {
+  async list(includeArchived = false): Promise<SessionState[]> {
     try {
       const files = await fs.readdir(this.baseDir);
       const sessions: SessionState[] = [];
@@ -35,7 +35,9 @@ export class SessionStore {
           path.join(this.baseDir, file),
           "utf-8"
         );
-        sessions.push(JSON.parse(content) as SessionState);
+        const session = JSON.parse(content) as SessionState;
+        if (!includeArchived && session.status === "archived") continue;
+        sessions.push(session);
       }
       sessions.sort(
         (a, b) =>
@@ -46,6 +48,15 @@ export class SessionStore {
     } catch {
       return [];
     }
+  }
+
+  async archive(sessionId: string): Promise<void> {
+    const session = await this.load(sessionId);
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+    session.status = "archived";
+    await this.save(session);
   }
 
   async getLatest(): Promise<SessionState | null> {

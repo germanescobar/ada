@@ -8,8 +8,8 @@ export class AnthropicProvider implements ModelProvider {
   private client: Anthropic;
   private model: string;
 
-  constructor(model: string, options?: { apiKey?: string }) {
-    this.client = new Anthropic({ apiKey: options?.apiKey });
+  constructor(model: string) {
+    this.client = new Anthropic();
     this.model = model;
   }
 
