@@ -1,6 +1,6 @@
 import type { Message, ContentBlock } from "./messages.js";
 
-export type SessionStatus = "active" | "paused" | "completed";
+export type SessionStatus = "active" | "paused" | "completed" | "archived";
 
 export interface SessionState {
   id: string;

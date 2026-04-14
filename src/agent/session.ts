@@ -41,7 +41,12 @@ export class SessionManager {
     return session;
   }
 
-  async listSessions(): Promise<SessionState[]> {
-    return this.sessionStore.list();
+  async listSessions(includeArchived = false): Promise<SessionState[]> {
+    return this.sessionStore.list(includeArchived);
+  }
+
+  async archiveSession(sessionId: string): Promise<void> {
+    await this.sessionStore.archive(sessionId);
+    await this.eventStore.append(sessionId, "session_archived", {});
   }
 }
