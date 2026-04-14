@@ -153,11 +153,12 @@ export function createCLI() {
   program
     .command("sessions")
     .description("List past sessions")
-    .action(async () => {
+    .option("--archived", "Include archived sessions")
+    .action(async (options: { archived?: boolean }) => {
       const cwd = process.cwd();
       const paths = getStoragePaths(cwd);
       const sessionStore = new SessionStore(paths.sessions);
-      const sessions = await sessionStore.list();
+      const sessions = await sessionStore.list(options.archived ?? false);
 
       if (sessions.length === 0) {
         console.log("No sessions found.");
@@ -166,9 +167,30 @@ export function createCLI() {
 
       for (const s of sessions) {
         const msgCount = s.messages.length;
+        const archived = s.status === "archived" ? chalk.yellow(" [archived]") : "";
         console.log(
-          `${chalk.cyan(s.id)}  ${s.model}  ${msgCount} msgs  ${s.lastActiveAt}`
+          `${chalk.cyan(s.id)}${archived}  ${s.model}  ${msgCount} msgs  ${s.lastActiveAt}`
         );
+      }
+    });
+
+  program
+    .command("archive")
+    .argument("<sessionId>", "Session ID to archive")
+    .description("Archive a session")
+    .action(async (sessionId: string) => {
+      const cwd = process.cwd();
+      const paths = getStoragePaths(cwd);
+      const eventStore = new EventStore(paths.events);
+      const sessionStore = new SessionStore(paths.sessions);
+      const sessionManager = new SessionManager(sessionStore, eventStore);
+
+      try {
+        await sessionManager.archiveSession(sessionId);
+        console.log(chalk.green(`Session ${sessionId.slice(0, 8)} archived.`));
+      } catch (err) {
+        console.error(chalk.red((err as Error).message));
+        process.exit(1);
       }
     });
 
