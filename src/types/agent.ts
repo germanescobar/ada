@@ -4,6 +4,7 @@ export type SessionStatus = "active" | "paused" | "completed";
 
 export interface SessionState {
   id: string;
+  title?: string;
   workingDirectory: string;
   model: string; // e.g., "anthropic/claude-sonnet-4-6"
   messages: Message[];

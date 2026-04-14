@@ -22,30 +22,30 @@ export function parseModelString(modelString: string): ResolvedModel {
   };
 }
 
-export function createProvider(
-  modelString: string,
-  options?: { baseURL?: string; apiKey?: string }
-): ModelProvider {
+export function createProvider(modelString: string): ModelProvider {
   const { provider, model } = parseModelString(modelString);
 
   switch (provider) {
     case "anthropic":
-      return new AnthropicProvider(model, { apiKey: options?.apiKey });
+      return new AnthropicProvider(model);
 
     case "openai":
+      return new OpenAIProvider(model);
+
+    case "groq":
       return new OpenAIProvider(model, {
-        apiKey: options?.apiKey,
-        baseURL: options?.baseURL,
+        apiKey: process.env.GROQ_API_KEY,
+        baseURL: "https://api.groq.com/openai/v1",
       });
 
     case "ollama":
       return new OpenAIProvider(model, {
-        baseURL: options?.baseURL ?? OLLAMA_BASE_URL,
+        baseURL: OLLAMA_BASE_URL,
       });
 
     default:
       throw new Error(
-        `Unknown provider: "${provider}". Supported: anthropic, openai, ollama`
+        `Unknown provider: "${provider}". Supported: anthropic, openai, groq, ollama`
       );
   }
 }
