@@ -2,6 +2,7 @@ import { exec } from "node:child_process";
 import type { ToolDefinition } from "../types/tools.js";
 
 const DEFAULT_TIMEOUT = 30_000; // 30 seconds
+const MAX_OUTPUT_CHARS = 10_000;
 
 export const runCommandTool: ToolDefinition = {
   name: "run_command",
@@ -28,8 +29,13 @@ export const runCommandTool: ToolDefinition = {
           parts.push(`[exit code: ${error.code}]`);
         }
 
+        let content = parts.join("\n") || "(no output)";
+        if (content.length > MAX_OUTPUT_CHARS) {
+          content = content.slice(0, MAX_OUTPUT_CHARS) + `\n[truncated: output exceeded ${MAX_OUTPUT_CHARS} characters]`;
+        }
+
         resolve({
-          content: parts.join("\n") || "(no output)",
+          content,
           isError: !!error,
         });
       });
