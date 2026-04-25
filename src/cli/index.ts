@@ -94,7 +94,8 @@ export function createCLI() {
         ? await sessionManager.resumeSession(options.resume)
         : await sessionManager.createSession(cwd, model);
 
-      const modelString = (options.resume && options.model) ? options.model : session.model;
+      const explicitModel = options.model ?? (program.getOptionValueSource("model") === "cli" ? parentOpts.model : undefined);
+      const modelString = options.resume ? (explicitModel ?? session.model) : model;
       const provider = createProvider(modelString);
 
       // Set up tools
