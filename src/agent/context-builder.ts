@@ -1,12 +1,7 @@
 import { exec } from "node:child_process";
+import type { Message } from "../types/messages.js";
 
-export class ContextBuilder {
-  constructor(private workingDirectory: string) {}
-
-  async buildSystemPrompt(): Promise<string> {
-    const gitContext = await this.getGitContext();
-
-    return `You are Ada, a coding agent working in: ${this.workingDirectory}
+const STATIC_SYSTEM_PROMPT = `You are Ada, a coding agent.
 
 You have these tools available:
 - read_file: Read file contents
@@ -15,13 +10,42 @@ You have these tools available:
 - delete_file: Delete a file
 - run_command: Run a shell command
 
-${gitContext}
-
 Instructions:
 - Use tools to explore and understand the codebase before making changes
 - Always read a file before editing it
 - Run tests or checks after making changes when appropriate
 - Explain what you are doing briefly`;
+
+export class ContextBuilder {
+  constructor(private workingDirectory: string) {}
+
+  buildSystemPrompt(): string {
+    return STATIC_SYSTEM_PROMPT;
+  }
+
+  async buildDynamicContext(): Promise<string> {
+    const gitContext = await this.getGitContext();
+
+    return [
+      "Current environment context:",
+      `Working directory: ${this.workingDirectory}`,
+      gitContext,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+  }
+
+  async buildMessagesWithDynamicContext(messages: Message[]): Promise<Message[]> {
+    const dynamicContext = await this.buildDynamicContext();
+    if (!dynamicContext) return messages;
+
+    return [
+      ...messages,
+      {
+        role: "user",
+        content: [{ type: "text", text: dynamicContext }],
+      },
+    ];
   }
 
   private async getGitContext(): Promise<string> {

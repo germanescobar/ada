@@ -33,7 +33,7 @@ export class AgentLoop {
       text: userMessage,
     });
 
-    const systemPrompt = await this.contextBuilder.buildSystemPrompt();
+    const systemPrompt = this.contextBuilder.buildSystemPrompt();
     const tools = this.registry.toSchemas();
     let finalStopReason = "max_iterations";
     let status: "completed" | "max_iterations" = "max_iterations";
@@ -47,9 +47,12 @@ export class AgentLoop {
     });
 
     for (let i = 0; i < MAX_ITERATIONS; i++) {
+      const messages = await this.contextBuilder.buildMessagesWithDynamicContext(
+        session.messages
+      );
       const response = await this.provider.chat({
         systemPrompt,
-        messages: session.messages,
+        messages,
         tools,
       });
 
