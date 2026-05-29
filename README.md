@@ -158,7 +158,7 @@ The Coding Agent is built with a modular architecture:
 ### Core Components
 
 - **Agent Loop** - Manages the conversation cycle, including message handling and tool execution
-- **Context Builder** - Constructs system prompts with file system information
+- **Context Builder** - Separates stable agent instructions from dynamic environment context
 - **Executor** - Executes AI-generated tool calls with safety policies
 - **Provider** - Abstracts AI model interactions (Anthropic, OpenAI)
 - **Tool Registry** - Manages available tools and their schemas
@@ -181,7 +181,7 @@ The Coding Agent is built with a modular architecture:
 coding-agent/
 ├── src/
 │   ├── agent/
-│   │   ├── context-builder.ts    # Builds system prompts with context
+│   │   ├── context-builder.ts    # Builds static prompts and dynamic context
 │   │   ├── executor.ts            # Executes tool calls safely
 │   │   ├── loop.ts                # Main conversation loop
 │   │   ├── policies.ts            # Safety and approval policies
