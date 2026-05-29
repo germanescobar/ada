@@ -70,9 +70,10 @@ export class AgentLoop {
           usage: response.usage,
         });
 
-        // Append assistant response to messages
-        session.messages.push({ role: "assistant", content: response.content });
-        await this.saveSession(session);
+        const assistantMessage: Message = {
+          role: "assistant",
+          content: response.content,
+        };
 
         if (response.reasoning) {
           this.emit({ type: "assistant.reasoning", text: response.reasoning });
@@ -88,6 +89,8 @@ export class AgentLoop {
         // If no tool use, we're done
         finalStopReason = response.stopReason;
         if (response.stopReason !== "tool_use") {
+          session.messages.push(assistantMessage);
+          await this.saveSession(session);
           status = "completed";
           break;
         }
@@ -104,7 +107,8 @@ export class AgentLoop {
 
         const resultBlocks: ContentBlock[] = [];
 
-        for (const toolUse of toolUseBlocks) {
+        for (let toolIndex = 0; toolIndex < toolUseBlocks.length; toolIndex++) {
+          const toolUse = toolUseBlocks[toolIndex];
           this.emit({
             type: "tool.call",
             id: toolUse.id,
@@ -112,11 +116,37 @@ export class AgentLoop {
             input: toolUse.input,
           });
 
-          const result = await this.executor.executeTool(session.id, {
-            id: toolUse.id,
-            name: toolUse.name,
-            input: toolUse.input,
-          });
+          let result;
+          try {
+            result = await this.executor.executeTool(session.id, {
+              id: toolUse.id,
+              name: toolUse.name,
+              input: toolUse.input,
+            });
+          } catch (err) {
+            resultBlocks.push(
+              this.createErrorToolResult(
+                toolUse,
+                `Tool "${toolUse.name}" failed before returning a result: ${
+                  err instanceof Error ? err.message : String(err)
+                }`
+              )
+            );
+
+            for (const skippedToolUse of toolUseBlocks.slice(toolIndex + 1)) {
+              resultBlocks.push(
+                this.createErrorToolResult(
+                  skippedToolUse,
+                  `Tool "${skippedToolUse.name}" was not executed because a previous tool failed.`
+                )
+              );
+            }
+
+            session.messages.push(assistantMessage);
+            session.messages.push({ role: "user", content: resultBlocks });
+            await this.saveSession(session);
+            throw err;
+          }
 
           this.emit({
             type: "tool.result",
@@ -135,6 +165,7 @@ export class AgentLoop {
         }
 
         // Append tool results as user message
+        session.messages.push(assistantMessage);
         session.messages.push({ role: "user", content: resultBlocks });
         await this.saveSession(session);
       }
@@ -174,6 +205,18 @@ export class AgentLoop {
   private async saveSession(session: SessionState): Promise<void> {
     session.lastActiveAt = new Date().toISOString();
     await this.sessionStore.save(session);
+  }
+
+  private createErrorToolResult(
+    toolUse: { id: string; name: string },
+    content: string
+  ): ContentBlock {
+    return {
+      type: "tool_result",
+      toolUseId: toolUse.id,
+      content,
+      isError: true,
+    };
   }
 
   private emit(event: StreamEvent): void {

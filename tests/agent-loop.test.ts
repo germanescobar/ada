@@ -12,7 +12,7 @@ import { EventStore } from "../src/storage/event-store.js";
 import { SessionStore } from "../src/storage/session-store.js";
 import { ToolRegistry } from "../src/tools/registry.js";
 import type { ModelResponse, SessionState } from "../src/types/agent.js";
-import type { ToolResult } from "../src/types/tools.js";
+import type { ToolCall, ToolResult } from "../src/types/tools.js";
 
 function createTempDir(): string {
   return mkdtempSync(path.join(tmpdir(), "ada-agent-loop-"));
@@ -34,14 +34,15 @@ function createSession(cwd: string): SessionState {
 function createLoop(
   cwd: string,
   provider: ModelProvider,
-  executeTool: () => Promise<ToolResult> = async () => ({
+  executeTool: (toolCall: ToolCall) => Promise<ToolResult> = async () => ({
     content: "unused",
   })
 ): { loop: AgentLoop; eventStore: EventStore; sessionStore: SessionStore } {
   const eventStore = new EventStore(path.join(cwd, "events"));
   const sessionStore = new SessionStore(path.join(cwd, "sessions"));
   const executor = {
-    executeTool: async () => executeTool(),
+    executeTool: async (_sessionId: string, toolCall: ToolCall) =>
+      executeTool(toolCall),
   };
 
   return {
@@ -160,6 +161,96 @@ test("run saves assistant responses and tool-result batches before later failure
             type: "tool_result",
             toolUseId: "tool-1",
             content: "file contents",
+          },
+        ],
+      },
+    ]);
+
+    const events = await eventStore.getEvents(session.id);
+    assert.deepEqual(
+      events.map((event) => event.type),
+      ["user_message", "assistant_response", "error"]
+    );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("run saves synthetic error tool results when tool execution throws", async () => {
+  const cwd = createTempDir();
+  const session = createSession(cwd);
+  const provider: ModelProvider = {
+    async chat() {
+      return {
+        stopReason: "tool_use",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool-1",
+            name: "read_file",
+            input: { path: "README.md" },
+          },
+          {
+            type: "tool_use",
+            id: "tool-2",
+            name: "run_command",
+            input: { command: "npm test" },
+          },
+        ],
+      };
+    },
+  };
+  const { loop, eventStore, sessionStore } = createLoop(
+    cwd,
+    provider,
+    async () => {
+      throw new Error("disk read failed");
+    }
+  );
+
+  try {
+    await assert.rejects(
+      silenceConsole(() => loop.run(session, "Read and test")),
+      /disk read failed/
+    );
+
+    const saved = await sessionStore.load(session.id);
+    assert.ok(saved);
+    assert.deepEqual(saved.messages, [
+      { role: "user", content: "Read and test" },
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool-1",
+            name: "read_file",
+            input: { path: "README.md" },
+          },
+          {
+            type: "tool_use",
+            id: "tool-2",
+            name: "run_command",
+            input: { command: "npm test" },
+          },
+        ],
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            toolUseId: "tool-1",
+            content:
+              'Tool "read_file" failed before returning a result: disk read failed',
+            isError: true,
+          },
+          {
+            type: "tool_result",
+            toolUseId: "tool-2",
+            content:
+              'Tool "run_command" was not executed because a previous tool failed.',
+            isError: true,
           },
         ],
       },
