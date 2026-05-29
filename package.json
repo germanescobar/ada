@@ -12,6 +12,7 @@
   "scripts": {
     "dev": "tsx src/index.ts",
     "build": "tsc",
+    "test": "node --test --import tsx \"tests/**/*.test.ts\"",
     "start": "node dist/index.js",
     "eval": "tsx evals/run.ts",
     "prepublishOnly": "npm run build"
