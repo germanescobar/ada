@@ -12,11 +12,13 @@ export class ToolRegistry {
   }
 
   toSchemas(): ToolSchema[] {
-    return Array.from(this.tools.values()).map((tool) => ({
-      name: tool.name,
-      description: tool.description,
-      parameters: tool.inputSchema,
-    }));
+    return Array.from(this.tools.values())
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.inputSchema,
+      }));
   }
 
   async execute(
