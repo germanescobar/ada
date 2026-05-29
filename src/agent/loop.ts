@@ -23,129 +23,145 @@ export class AgentLoop {
   ) {}
 
   async run(session: SessionState, userMessage: string): Promise<void> {
-    // Append user message
-    session.messages.push({ role: "user", content: userMessage });
-    session.lastActiveAt = new Date().toISOString();
-    if (!session.title) {
-      session.title = this.generateTitle(userMessage);
-    }
-    await this.eventStore.append(session.id, "user_message", {
-      text: userMessage,
-    });
+    try {
+      // Append user message
+      session.messages.push({ role: "user", content: userMessage });
+      if (!session.title) {
+        session.title = this.generateTitle(userMessage);
+      }
+      await this.eventStore.append(session.id, "user_message", {
+        text: userMessage,
+      });
+      await this.saveSession(session);
 
-    const systemPrompt = this.contextBuilder.buildSystemPrompt();
-    const tools = this.registry.toSchemas();
-    let finalStopReason = "max_iterations";
-    let status: "completed" | "max_iterations" = "max_iterations";
+      const systemPrompt = this.contextBuilder.buildSystemPrompt();
+      const tools = this.registry.toSchemas();
+      let finalStopReason = "max_iterations";
+      let status: "completed" | "max_iterations" = "max_iterations";
 
-    this.emit({
-      type: "run.started",
-      sessionId: session.id,
-      model: session.model,
-      workingDirectory: session.workingDirectory,
-      timestamp: new Date().toISOString(),
-    });
-
-    for (let i = 0; i < MAX_ITERATIONS; i++) {
-      const messages = await this.contextBuilder.buildMessagesWithDynamicContext(
-        session.messages
-      );
-      const response = await this.provider.chat({
-        systemPrompt,
-        messages,
-        tools,
+      this.emit({
+        type: "run.started",
+        sessionId: session.id,
+        model: session.model,
+        workingDirectory: session.workingDirectory,
+        timestamp: new Date().toISOString(),
       });
 
-      if (response.reasoning) {
-        await this.eventStore.append(session.id, "assistant_reasoning", {
-          text: response.reasoning,
+      for (let i = 0; i < MAX_ITERATIONS; i++) {
+        const messages = await this.contextBuilder.buildMessagesWithDynamicContext(
+          session.messages
+        );
+        const response = await this.provider.chat({
+          systemPrompt,
+          messages,
+          tools,
         });
-      }
 
-      await this.eventStore.append(session.id, "assistant_response", {
-        stopReason: response.stopReason,
-        content: response.content,
-        reasoning: response.reasoning,
-        usage: response.usage,
-      });
-
-      // Append assistant response to messages
-      session.messages.push({ role: "assistant", content: response.content });
-
-      if (response.reasoning) {
-        this.emit({ type: "assistant.reasoning", text: response.reasoning });
-      }
-
-      // Print any text blocks
-      for (const block of response.content) {
-        if (block.type === "text") {
-          this.emit({ type: "assistant.text", text: block.text });
+        if (response.reasoning) {
+          await this.eventStore.append(session.id, "assistant_reasoning", {
+            text: response.reasoning,
+          });
         }
+
+        await this.eventStore.append(session.id, "assistant_response", {
+          stopReason: response.stopReason,
+          content: response.content,
+          reasoning: response.reasoning,
+          usage: response.usage,
+        });
+
+        // Append assistant response to messages
+        session.messages.push({ role: "assistant", content: response.content });
+        await this.saveSession(session);
+
+        if (response.reasoning) {
+          this.emit({ type: "assistant.reasoning", text: response.reasoning });
+        }
+
+        // Print any text blocks
+        for (const block of response.content) {
+          if (block.type === "text") {
+            this.emit({ type: "assistant.text", text: block.text });
+          }
+        }
+
+        // If no tool use, we're done
+        finalStopReason = response.stopReason;
+        if (response.stopReason !== "tool_use") {
+          status = "completed";
+          break;
+        }
+
+        // Execute tool calls
+        const toolUseBlocks = response.content.filter(
+          (b) => b.type === "tool_use"
+        ) as Array<{
+          type: "tool_use";
+          id: string;
+          name: string;
+          input: Record<string, unknown>;
+        }>;
+
+        const resultBlocks: ContentBlock[] = [];
+
+        for (const toolUse of toolUseBlocks) {
+          this.emit({
+            type: "tool.call",
+            id: toolUse.id,
+            name: toolUse.name,
+            input: toolUse.input,
+          });
+
+          const result = await this.executor.executeTool(session.id, {
+            id: toolUse.id,
+            name: toolUse.name,
+            input: toolUse.input,
+          });
+
+          this.emit({
+            type: "tool.result",
+            id: toolUse.id,
+            name: toolUse.name,
+            content: result.content,
+            isError: Boolean(result.isError),
+          });
+
+          resultBlocks.push({
+            type: "tool_result",
+            toolUseId: toolUse.id,
+            content: result.content,
+            isError: result.isError,
+          });
+        }
+
+        // Append tool results as user message
+        session.messages.push({ role: "user", content: resultBlocks });
+        await this.saveSession(session);
       }
 
-      // If no tool use, we're done
-      finalStopReason = response.stopReason;
-      if (response.stopReason !== "tool_use") {
-        status = "completed";
-        break;
+      await this.saveSession(session);
+      this.emit({
+        type: "run.completed",
+        sessionId: session.id,
+        status,
+        stopReason: finalStopReason as "end_turn" | "tool_use" | "max_tokens" | "error",
+        timestamp: new Date().toISOString(),
+      });
+    } catch (err) {
+      try {
+        await this.saveSession(session);
+      } catch {
+        // Preserve the original run failure.
       }
-
-      // Execute tool calls
-      const toolUseBlocks = response.content.filter(
-        (b) => b.type === "tool_use"
-      ) as Array<{
-        type: "tool_use";
-        id: string;
-        name: string;
-        input: Record<string, unknown>;
-      }>;
-
-      const resultBlocks: ContentBlock[] = [];
-
-      for (const toolUse of toolUseBlocks) {
-        this.emit({
-          type: "tool.call",
-          id: toolUse.id,
-          name: toolUse.name,
-          input: toolUse.input,
+      try {
+        await this.eventStore.append(session.id, "error", {
+          message: err instanceof Error ? err.message : String(err),
         });
-
-        const result = await this.executor.executeTool(session.id, {
-          id: toolUse.id,
-          name: toolUse.name,
-          input: toolUse.input,
-        });
-
-        this.emit({
-          type: "tool.result",
-          id: toolUse.id,
-          name: toolUse.name,
-          content: result.content,
-          isError: Boolean(result.isError),
-        });
-
-        resultBlocks.push({
-          type: "tool_result",
-          toolUseId: toolUse.id,
-          content: result.content,
-          isError: result.isError,
-        });
+      } catch {
+        // Preserve the original run failure.
       }
-
-      // Append tool results as user message
-      session.messages.push({ role: "user", content: resultBlocks });
+      throw err;
     }
-
-    // Save session
-    session.lastActiveAt = new Date().toISOString();
-    await this.sessionStore.save(session);
-    this.emit({
-      type: "run.completed",
-      sessionId: session.id,
-      status,
-      stopReason: finalStopReason as "end_turn" | "tool_use" | "max_tokens" | "error",
-      timestamp: new Date().toISOString(),
-    });
   }
 
   private generateTitle(message: string): string {
@@ -153,6 +169,11 @@ export class AgentLoop {
     if (!firstLine) return 'Chat session';
     if (firstLine.length <= 72) return firstLine;
     return firstLine.slice(0, 69) + '...';
+  }
+
+  private async saveSession(session: SessionState): Promise<void> {
+    session.lastActiveAt = new Date().toISOString();
+    await this.sessionStore.save(session);
   }
 
   private emit(event: StreamEvent): void {
