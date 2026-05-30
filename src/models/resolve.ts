@@ -37,6 +37,13 @@ export const MODEL_OPTIONS = [
   })),
 ] as const;
 
+export type ModelOption = (typeof MODEL_OPTIONS)[number];
+
+export interface ModelOptionGroup {
+  group: ModelOption["group"];
+  options: ModelOption[];
+}
+
 export interface ResolvedModel {
   provider: string;
   model: string;
@@ -67,6 +74,23 @@ export function parseModelString(modelString: string): ResolvedModel {
     provider: modelString.slice(0, slashIndex),
     model: modelString.slice(slashIndex + 1),
   };
+}
+
+export function groupModelOptions(
+  options: readonly ModelOption[] = MODEL_OPTIONS
+): ModelOptionGroup[] {
+  const groups: ModelOptionGroup[] = [];
+
+  for (const option of options) {
+    let group = groups.find((item) => item.group === option.group);
+    if (!group) {
+      group = { group: option.group, options: [] };
+      groups.push(group);
+    }
+    group.options.push(option);
+  }
+
+  return groups;
 }
 
 function assertSupportedOllamaCloudModel(model: string): void {

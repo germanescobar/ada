@@ -16,7 +16,12 @@ import { ContextBuilder } from "../agent/context-builder.js";
 import { Executor } from "../agent/executor.js";
 import { AgentLoop } from "../agent/loop.js";
 import { SessionManager } from "../agent/session.js";
-import { createProvider } from "../models/resolve.js";
+import {
+  createProvider,
+  groupModelOptions,
+  MODEL_OPTIONS,
+  type ModelOption,
+} from "../models/resolve.js";
 
 const DEFAULT_MODEL = "anthropic/claude-sonnet-4-6";
 
@@ -26,6 +31,19 @@ function getStoragePaths(cwd: string) {
     events: path.join(base, "events"),
     sessions: path.join(base, "sessions"),
   };
+}
+
+export function formatModelOptions(
+  options: readonly ModelOption[] = MODEL_OPTIONS
+): string {
+  return groupModelOptions(options)
+    .map((group) => {
+      const lines = group.options.map(
+        (option) => `  ${option.value.padEnd(38)} ${option.label}`
+      );
+      return [group.group, ...lines].join("\n");
+    })
+    .join("\n\n");
 }
 
 async function askApproval(
@@ -57,6 +75,13 @@ export function createCLI() {
     .option("--model <model>", "Model to use (provider/model)", DEFAULT_MODEL)
     .option("--stream-json", "Emit structured JSON events to stdout")
     .option("--auto-approve", "Auto-approve tool calls (dangerous commands are still denied)");
+
+  program
+    .command("models")
+    .description("List supported model choices")
+    .action(() => {
+      console.log(formatModelOptions());
+    });
 
   program
     .command("chat")
