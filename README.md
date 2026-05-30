@@ -94,6 +94,16 @@ View detailed events for a specific session:
 ada events <session-id>
 ```
 
+### List Supported Models
+
+Show the built-in model choices grouped by provider:
+
+```bash
+ada models
+```
+
+Each listed value is a `provider/model` string that can be passed to `--model`. Local Ollama models use the `ollama/` provider, while Ollama Cloud models use `ollama-cloud/`.
+
 ### Custom Model
 
 Use a different AI model:
