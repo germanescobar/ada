@@ -18,6 +18,7 @@ import { AgentLoop } from "../agent/loop.js";
 import { SessionManager } from "../agent/session.js";
 import {
   createProvider,
+  getModelOptions,
   groupModelOptions,
   MODEL_OPTIONS,
   type ModelOption,
@@ -79,8 +80,16 @@ export function createCLI() {
   program
     .command("models")
     .description("List supported model choices")
-    .action(() => {
-      console.log(formatModelOptions());
+    .action(async () => {
+      const result = await getModelOptions();
+      console.log(formatModelOptions(result.options));
+      if (result.ollamaDiscoveryFailed) {
+        console.error(
+          chalk.gray(
+            "Note: Local Ollama discovery unavailable; showing built-in local models."
+          )
+        );
+      }
     });
 
   program

@@ -2,12 +2,16 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  discoverLocalOllamaModelOptions,
+  getModelOptions,
   MODEL_OPTIONS,
   OLLAMA_CLOUD_MODELS,
   parseModelString,
   type ProviderConfig,
   resolveProviderConfig,
 } from "../src/models/resolve.js";
+
+type MockFetch = typeof fetch;
 
 function assertOpenAICompatible(
   config: ProviderConfig
@@ -125,5 +129,71 @@ test("model options separate Ollama local and Ollama Cloud choices", () => {
   assert.deepEqual(
     cloudOptions.map((option) => option.value),
     OLLAMA_CLOUD_MODELS.map((model) => `ollama-cloud/${model}`)
+  );
+});
+
+test("discovers installed local Ollama models from the tags API", async () => {
+  const fetchImpl: MockFetch = async () =>
+    new Response(
+      JSON.stringify({
+        models: [
+          { name: "gemma4:31b" },
+          { model: "qwen3:latest" },
+        ],
+      })
+    );
+
+  const options = await discoverLocalOllamaModelOptions(fetchImpl);
+
+  assert.deepEqual(options, [
+    {
+      label: "gemma4:31b (local)",
+      value: "ollama/gemma4:31b",
+      group: "Ollama Local",
+    },
+    {
+      label: "qwen3:latest (local)",
+      value: "ollama/qwen3:latest",
+      group: "Ollama Local",
+    },
+  ]);
+});
+
+test("model options keep built-in local fallback when Ollama is unavailable", async () => {
+  const fetchImpl: MockFetch = async () => {
+    throw new Error("connect ECONNREFUSED 127.0.0.1:11434");
+  };
+
+  const result = await getModelOptions(fetchImpl);
+
+  assert.equal(result.ollamaDiscoveryFailed, true);
+  assert.deepEqual(result.options, [...MODEL_OPTIONS]);
+});
+
+test("model options merge discovered Ollama models into the local group", async () => {
+  const fetchImpl: MockFetch = async () =>
+    new Response(
+      JSON.stringify({
+        models: [
+          { name: "gemma4:31b" },
+          { name: "glm-4.7-flash:latest" },
+        ],
+      })
+    );
+
+  const result = await getModelOptions(fetchImpl);
+  const localOptions = result.options.filter(
+    (option) => option.group === "Ollama Local"
+  );
+
+  assert.equal(result.ollamaDiscoveryFailed, false);
+  assert.ok(
+    localOptions.some((option) => option.value === "ollama/gemma4:31b")
+  );
+  assert.equal(
+    localOptions.filter(
+      (option) => option.value === "ollama/glm-4.7-flash:latest"
+    ).length,
+    1
   );
 });
