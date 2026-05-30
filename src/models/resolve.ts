@@ -3,8 +3,10 @@ import { AnthropicProvider } from "./anthropic.js";
 import { OpenAIProvider } from "./openai.js";
 
 const OLLAMA_BASE_URL = "http://localhost:11434/v1";
+const OLLAMA_TAGS_URL = "http://localhost:11434/api/tags";
 const OLLAMA_CLOUD_BASE_URL = "https://ollama.com/v1";
 const GROQ_BASE_URL = "https://api.groq.com/openai/v1";
+const OLLAMA_DISCOVERY_TIMEOUT_MS = 1_000;
 
 export const OLLAMA_CLOUD_MODELS = [
   "glm-5.1",
@@ -13,7 +15,19 @@ export const OLLAMA_CLOUD_MODELS = [
   "kimi-k2.6",
 ] as const;
 
-export const MODEL_OPTIONS = [
+export type ModelOptionGroupName =
+  | "Anthropic"
+  | "OpenAI"
+  | "Ollama Local"
+  | "Ollama Cloud";
+
+export interface ModelOption {
+  label: string;
+  value: string;
+  group: ModelOptionGroupName;
+}
+
+export const MODEL_OPTIONS: readonly ModelOption[] = [
   {
     label: "Claude Sonnet 4.6",
     value: "anthropic/claude-sonnet-4-6",
@@ -30,18 +44,21 @@ export const MODEL_OPTIONS = [
     value: "ollama/glm-4.7-flash:latest",
     group: "Ollama Local",
   },
-  ...OLLAMA_CLOUD_MODELS.map((model) => ({
+  ...OLLAMA_CLOUD_MODELS.map((model): ModelOption => ({
     label: `${model} (cloud)`,
     value: `ollama-cloud/${model}`,
     group: "Ollama Cloud",
   })),
-] as const;
-
-export type ModelOption = (typeof MODEL_OPTIONS)[number];
+];
 
 export interface ModelOptionGroup {
-  group: ModelOption["group"];
+  group: ModelOptionGroupName;
   options: ModelOption[];
+}
+
+export interface ModelOptionsResult {
+  options: ModelOption[];
+  ollamaDiscoveryFailed: boolean;
 }
 
 export interface ResolvedModel {
@@ -91,6 +108,59 @@ export function groupModelOptions(
   }
 
   return groups;
+}
+
+export async function getModelOptions(
+  fetchImpl: typeof fetch = fetch
+): Promise<ModelOptionsResult> {
+  const discoveredOllamaOptions =
+    await discoverLocalOllamaModelOptions(fetchImpl);
+  const staticValues = new Set(MODEL_OPTIONS.map((option) => option.value));
+  const dynamicOptions = (discoveredOllamaOptions ?? []).filter(
+    (option) => !staticValues.has(option.value)
+  );
+
+  return {
+    options: [...MODEL_OPTIONS, ...dynamicOptions],
+    ollamaDiscoveryFailed: discoveredOllamaOptions === undefined,
+  };
+}
+
+export async function discoverLocalOllamaModelOptions(
+  fetchImpl: typeof fetch = fetch
+): Promise<ModelOption[] | undefined> {
+  try {
+    const response = await fetchImpl(OLLAMA_TAGS_URL, {
+      signal: AbortSignal.timeout(OLLAMA_DISCOVERY_TIMEOUT_MS),
+    });
+    if (!response.ok) return undefined;
+
+    const payload: unknown = await response.json();
+    return parseOllamaModelNames(payload).map((name) => ({
+      label: `${name} (local)`,
+      value: `ollama/${name}`,
+      group: "Ollama Local",
+    }));
+  } catch {
+    return undefined;
+  }
+}
+
+function parseOllamaModelNames(payload: unknown): string[] {
+  if (!isRecord(payload) || !Array.isArray(payload.models)) return [];
+
+  return payload.models
+    .map((model) => {
+      if (!isRecord(model)) return undefined;
+      const name = model.name ?? model.model;
+      return typeof name === "string" && name.length > 0 ? name : undefined;
+    })
+    .filter((name): name is string => name !== undefined)
+    .sort((left, right) => left.localeCompare(right));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 function assertSupportedOllamaCloudModel(model: string): void {
