@@ -8,7 +8,7 @@ An intelligent AI-powered coding agent that helps you write, edit, and run code.
 - **File System Tools** - Read, write, and edit files seamlessly
 - **Command Execution** - Run shell commands safely with approval prompts
 - **Session Management** - Resume previous conversations and track history
-- **Multi-Provider Support** - Switch between Anthropic Claude and OpenAI models
+- **Multi-Provider Support** - Switch between Anthropic Claude, OpenAI, Groq, local Ollama, and Ollama Cloud models
 - **Event Logging** - Track all interactions and tool executions
 - **Reasoning Capture** - Preserve provider-exposed reasoning traces when available
 - **Type-Safe** - Built with TypeScript for reliability and type safety
@@ -102,13 +102,21 @@ Use a different AI model:
 ada chat "Your message here" --model ollama/glm-4.7-flash:latest
 ```
 
-### Custom Base URL
+### Ollama Cloud
 
-Connect to a custom API endpoint:
+Use a supported Ollama Cloud model with the `ollama-cloud/` provider. This is separate from the local `ollama/` provider, which still targets a local Ollama daemon.
 
 ```bash
-ada chat "Your message here" --base-url https://api.example.com/v1
+export OLLAMA_API_KEY=<your-ollama-api-key>
+ada chat "Your message here" --model ollama-cloud/glm-5.1
 ```
+
+Supported Ollama Cloud models:
+
+- `ollama-cloud/glm-5.1`
+- `ollama-cloud/minimax-m2.7`
+- `ollama-cloud/deepseek-v3.2`
+- `ollama-cloud/kimi-k2.6`
 
 ### JSON Event Streaming
 
@@ -231,6 +239,14 @@ Available providers (provider/model format):
 - `anthropic/claude-3-5-sonnet-2024-22-16`
 - `openai/gpt-4`
 - `openai/gpt-3.5-turbo`
+- `groq/<model>`
+- `ollama/<local-model>`
+- `ollama-cloud/glm-5.1`
+- `ollama-cloud/minimax-m2.7`
+- `ollama-cloud/deepseek-v3.2`
+- `ollama-cloud/kimi-k2.6`
+
+`ollama/<local-model>` targets `http://localhost:11434/v1`. `ollama-cloud/<model>` targets Ollama Cloud and uses `OLLAMA_API_KEY`.
 
 ## Configuration
 
