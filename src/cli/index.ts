@@ -141,7 +141,14 @@ export function createCLI() {
       registry.register(deleteFileTool);
 
       const policyEngine = PolicyEngine.withDefaults();
-      const contextBuilder = new ContextBuilder(cwd);
+      const contextBuilder = new ContextBuilder(cwd, {
+        approvalMode: autoApprove ? "auto" : "prompt",
+        networkAccess: "unknown",
+        shell: process.env.SHELL,
+        writeScope:
+          "Prefer the working directory and its descendants unless the user explicitly asks for another path.",
+        policyContext: policyEngine.describe(),
+      });
       const approvalFn = autoApprove ? async () => true : askApproval;
       const executor = new Executor(registry, policyEngine, eventStore, approvalFn);
       const loop = new AgentLoop(
