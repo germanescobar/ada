@@ -130,6 +130,11 @@ test("run saves assistant responses and tool-result batches before later failure
     provider,
     async () => ({
       content: "file contents",
+      metadata: {
+        bytes: 13,
+        lineCount: 1,
+        truncated: false,
+      },
     })
   );
 
@@ -161,6 +166,11 @@ test("run saves assistant responses and tool-result batches before later failure
             type: "tool_result",
             toolUseId: "tool-1",
             content: "file contents",
+            metadata: {
+              bytes: 13,
+              lineCount: 1,
+              truncated: false,
+            },
           },
         ],
       },

@@ -61,6 +61,7 @@ export class Executor {
       tool: toolCall.name,
       content: result.content.slice(0, 2000), // truncate for event log
       isError: result.isError,
+      metadata: result.metadata,
     });
 
     return result;

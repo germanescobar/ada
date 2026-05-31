@@ -11,9 +11,18 @@ export interface ToolDefinition {
   execute: (input: Record<string, unknown>) => Promise<ToolResult>;
 }
 
+export type ToolResultMetadata =
+  | string
+  | number
+  | boolean
+  | null
+  | ToolResultMetadata[]
+  | { [key: string]: ToolResultMetadata };
+
 export interface ToolResult {
   content: string;
   isError?: boolean;
+  metadata?: Record<string, ToolResultMetadata>;
 }
 
 export interface ToolCall {

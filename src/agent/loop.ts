@@ -154,6 +154,7 @@ export class AgentLoop {
             name: toolUse.name,
             content: result.content,
             isError: Boolean(result.isError),
+            metadata: result.metadata,
           });
 
           resultBlocks.push({
@@ -161,6 +162,7 @@ export class AgentLoop {
             toolUseId: toolUse.id,
             content: result.content,
             isError: result.isError,
+            metadata: result.metadata,
           });
         }
 

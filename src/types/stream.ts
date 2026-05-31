@@ -1,4 +1,5 @@
 import type { StopReason } from "./agent.js";
+import type { ToolResultMetadata } from "./tools.js";
 
 export type StreamEvent =
   | {
@@ -28,6 +29,7 @@ export type StreamEvent =
       name: string;
       content: string;
       isError: boolean;
+      metadata?: Record<string, ToolResultMetadata>;
     }
   | {
       type: "run.completed";
