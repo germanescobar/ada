@@ -1,4 +1,9 @@
 import { exec } from "node:child_process";
+import type {
+  ApprovalMode,
+  PolicyContext,
+  PolicyDecision,
+} from "./policies.js";
 import type { Message } from "../types/messages.js";
 
 const STATIC_SYSTEM_PROMPT = `You are Ada, a coding agent.
@@ -16,8 +21,21 @@ Instructions:
 - Run tests or checks after making changes when appropriate
 - Explain what you are doing briefly`;
 
+export type NetworkAccess = "available" | "unavailable" | "unknown";
+
+export interface RuntimeContextOptions {
+  shell?: string;
+  approvalMode?: ApprovalMode;
+  networkAccess?: NetworkAccess;
+  writeScope?: string;
+  policyContext?: PolicyContext;
+}
+
 export class ContextBuilder {
-  constructor(private workingDirectory: string) {}
+  constructor(
+    private workingDirectory: string,
+    private runtimeContext: RuntimeContextOptions = {}
+  ) {}
 
   buildSystemPrompt(): string {
     return STATIC_SYSTEM_PROMPT;
@@ -25,10 +43,13 @@ export class ContextBuilder {
 
   async buildDynamicContext(): Promise<string> {
     const gitContext = await this.getGitContext();
+    const environmentContext = this.buildEnvironmentContext();
+    const policyContext = this.buildPolicyContext();
 
     return [
       "Current environment context:",
-      `Working directory: ${this.workingDirectory}`,
+      environmentContext,
+      policyContext,
       gitContext,
     ]
       .filter(Boolean)
@@ -46,6 +67,69 @@ export class ContextBuilder {
         content: [{ type: "text", text: dynamicContext }],
       },
     ];
+  }
+
+  private buildEnvironmentContext(): string {
+    const shell = this.runtimeContext.shell ?? process.env.SHELL ?? "unknown";
+    const approvalMode = this.runtimeContext.approvalMode ?? "prompt";
+    const networkAccess = this.runtimeContext.networkAccess ?? "unknown";
+    const writeScope =
+      this.runtimeContext.writeScope ??
+      "No explicit write scope is configured; use the working directory unless the user asks otherwise.";
+
+    return [
+      "Runtime:",
+      `Working directory: ${this.workingDirectory}`,
+      `Shell: ${shell}`,
+      `Approval mode: ${this.describeApprovalMode(approvalMode)}`,
+      `Network access: ${this.describeNetworkAccess(networkAccess)}`,
+      `Write scope: ${writeScope}`,
+    ].join("\n");
+  }
+
+  private buildPolicyContext(): string {
+    const policyContext = this.runtimeContext.policyContext;
+    if (!policyContext) return "";
+
+    return [
+      "Permission policy:",
+      `Default decision: ${this.describeDecision(policyContext.defaultDecision)}`,
+      ...policyContext.rules.map(
+        (rule) =>
+          `- ${rule.toolName}: ${this.describeDecision(rule.decision)} - ${
+            rule.description
+          }`
+      ),
+    ].join("\n");
+  }
+
+  private describeApprovalMode(approvalMode: ApprovalMode): string {
+    if (approvalMode === "auto") {
+      return "auto-approve policy decisions that request approval";
+    }
+    return "prompt before executing tool calls that require approval";
+  }
+
+  private describeNetworkAccess(networkAccess: NetworkAccess): string {
+    switch (networkAccess) {
+      case "available":
+        return "available";
+      case "unavailable":
+        return "unavailable";
+      case "unknown":
+        return "not declared; verify before relying on network access";
+    }
+  }
+
+  private describeDecision(decision: PolicyDecision): string {
+    switch (decision) {
+      case "allow":
+        return "allowed";
+      case "deny":
+        return "denied";
+      case "ask":
+        return "approval required";
+    }
   }
 
   private async getGitContext(): Promise<string> {

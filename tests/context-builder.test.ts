@@ -6,6 +6,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { ContextBuilder } from "../src/agent/context-builder.js";
+import { PolicyEngine } from "../src/agent/policies.js";
 import type { Message } from "../src/types/messages.js";
 
 function createTempDir(): string {
@@ -23,6 +24,7 @@ test("buildSystemPrompt is stable and excludes environment context", () => {
   assert.equal(first.buildSystemPrompt(), second.buildSystemPrompt());
   assert.doesNotMatch(first.buildSystemPrompt(), /Working directory:/);
   assert.doesNotMatch(first.buildSystemPrompt(), /Git context:/);
+  assert.doesNotMatch(first.buildSystemPrompt(), /Permission policy:/);
   assert.doesNotMatch(first.buildSystemPrompt(), /\/tmp\/first/);
 });
 
@@ -37,10 +39,51 @@ test("buildDynamicContext includes cwd and current git context", async () => {
     const context = await new ContextBuilder(cwd).buildDynamicContext();
 
     assert.match(context, /Current environment context:/);
+    assert.match(context, /Runtime:/);
     assert.match(context, new RegExp(`Working directory: ${cwd}`));
+    assert.match(context, /Shell: /);
+    assert.match(
+      context,
+      /Approval mode: prompt before executing tool calls that require approval/
+    );
+    assert.match(
+      context,
+      /Network access: not declared; verify before relying on network access/
+    );
     assert.match(context, /Git context:/);
     assert.match(context, /Branch: feature\/context/);
     assert.match(context, /\?\? changed\.txt/);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("buildDynamicContext includes explicit permission policy when provided", async () => {
+  const cwd = createTempDir();
+
+  try {
+    const context = await new ContextBuilder(cwd, {
+      approvalMode: "auto",
+      networkAccess: "available",
+      shell: "/bin/zsh",
+      writeScope: "Only write under the repository root.",
+      policyContext: PolicyEngine.withDefaults().describe(),
+    }).buildDynamicContext();
+
+    assert.match(
+      context,
+      /Approval mode: auto-approve policy decisions that request approval/
+    );
+    assert.match(context, /Network access: available/);
+    assert.match(context, /Write scope: Only write under the repository root\./);
+    assert.match(context, /Permission policy:/);
+    assert.match(context, /Default decision: allowed/);
+    assert.match(context, /read_file: allowed - File reads are allowed\./);
+    assert.match(context, /run_command: denied - Commands matching dangerous patterns/);
+    assert.match(
+      context,
+      /run_command: approval required - Other shell commands require approval/
+    );
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
