@@ -50,9 +50,16 @@ export const readFileTool: ToolDefinition = {
 
       const ranged = applyLineRange(fullContent, startLine, endLine);
       const truncated = maxChars !== undefined && ranged.content.length > maxChars;
-      const content = truncated
-        ? `${ranged.content.slice(0, maxChars)}\n[truncated: output exceeded ${maxChars} characters]`
+      const returnedContent = truncated
+        ? ranged.content.slice(0, maxChars)
         : ranged.content;
+      const content = truncated
+        ? `${returnedContent}\n[truncated: output exceeded ${maxChars} characters]`
+        : returnedContent;
+      const returnedRange = calculateReturnedLineRange(
+        returnedContent,
+        ranged.returnedLineStart
+      );
 
       return {
         content,
@@ -61,8 +68,8 @@ export const readFileTool: ToolDefinition = {
           bytes: Buffer.byteLength(fullContent, "utf-8"),
           lineCount,
           returnedBytes: Buffer.byteLength(content, "utf-8"),
-          returnedLineStart: ranged.returnedLineStart,
-          returnedLineEnd: ranged.returnedLineEnd,
+          returnedLineStart: returnedRange.start,
+          returnedLineEnd: returnedRange.end,
           truncated,
           maxChars: maxChars ?? null,
         },
@@ -107,6 +114,24 @@ function applyLineRange(
 function countLines(content: string): number {
   if (content.length === 0) return 0;
   return content.split("\n").length;
+}
+
+function calculateReturnedLineRange(
+  content: string,
+  startLine: number | null
+): { start: number | null; end: number | null } {
+  if (content.length === 0 || startLine === null) {
+    return { start: null, end: null };
+  }
+
+  const returnedLineCount = content.endsWith("\n")
+    ? countLines(content) - 1
+    : countLines(content);
+
+  return {
+    start: startLine,
+    end: startLine + returnedLineCount - 1,
+  };
 }
 
 function readPositiveInteger(value: unknown): number | undefined {

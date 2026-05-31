@@ -33,7 +33,7 @@ test("read_file returns bounded content and structured metadata", async () => {
       lineCount: 5,
       returnedBytes: 49,
       returnedLineStart: 2,
-      returnedLineEnd: 4,
+      returnedLineEnd: 3,
       truncated: true,
       maxChars: 7,
     });
@@ -85,4 +85,16 @@ test("run_command returns exit and output metadata", async () => {
   assert.equal(result.metadata?.stdoutBytes, 12);
   assert.equal(result.metadata?.stderrBytes, 0);
   assert.equal(result.metadata?.timeoutMs, 30_000);
+});
+
+test("run_command reports signal termination without an exit code", async () => {
+  const result = await runCommandTool.execute({
+    command: "node -e \"process.kill(process.pid, 15)\"",
+  });
+
+  assert.equal(result.isError, true);
+  assert.match(result.content, /\[signal: SIGTERM\]/);
+  assert.equal(result.metadata?.exitCode, null);
+  assert.equal(result.metadata?.signal, "SIGTERM");
+  assert.equal(result.metadata?.timedOut, false);
 });

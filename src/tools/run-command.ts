@@ -26,6 +26,8 @@ export const runCommandTool: ToolDefinition = {
         if (stderr) parts.push(`[stderr]\n${stderr}`);
         if (error && error.killed) {
           parts.push(`[timeout] Command timed out after ${DEFAULT_TIMEOUT}ms`);
+        } else if (error && error.signal) {
+          parts.push(`[signal: ${error.signal}]`);
         } else if (error) {
           parts.push(`[exit code: ${error.code}]`);
         }
@@ -43,7 +45,7 @@ export const runCommandTool: ToolDefinition = {
           metadata: {
             command,
             cwd: process.cwd(),
-            exitCode: typeof error?.code === "number" ? error.code : 0,
+            exitCode: getExitCode(error),
             signal: error?.signal ?? null,
             timedOut: Boolean(error?.killed),
             truncated,
@@ -63,4 +65,11 @@ export const runCommandTool: ToolDefinition = {
 function countLines(content: string): number {
   if (content.length === 0) return 0;
   return content.split("\n").length;
+}
+
+function getExitCode(error: Error | null): number | null {
+  if (!error) return 0;
+
+  const maybeCode = error as Error & { code?: unknown };
+  return typeof maybeCode.code === "number" ? maybeCode.code : null;
 }
