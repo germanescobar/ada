@@ -238,7 +238,12 @@ export class AgentLoop {
 
     if (compactableMessages.length <= preserveCount) return;
 
-    const splitIndex = compactableMessages.length - preserveCount;
+    const splitIndex = this.findSafeCompactionSplitIndex(
+      compactableMessages,
+      compactableMessages.length - preserveCount
+    );
+    if (splitIndex <= 0) return;
+
     const olderMessages = compactableMessages.slice(0, splitIndex);
     const recentMessages = compactableMessages.slice(splitIndex);
     const summary = this.buildCompactionSummary(existingSummary, olderMessages);
@@ -297,17 +302,78 @@ export class AgentLoop {
     existingSummary: string | undefined,
     messages: Message[]
   ): string {
+    const newSummary = messages
+      .map((message) => `- ${message.role}: ${this.messageToText(message)}`)
+      .join("\n");
     const lines = [
       existingSummary ?? COMPACTION_SUMMARY_HEADER,
-      ...messages.map((message) => `- ${message.role}: ${this.messageToText(message)}`),
+      newSummary,
     ].filter((line): line is string => Boolean(line));
 
     const summary = lines.join("\n");
     const maxCharacters = this.contextBudget.summaryMaxCharacters;
     if (!maxCharacters || summary.length <= maxCharacters) return summary;
 
-    const contentLimit = Math.max(0, maxCharacters - 15);
-    return `${summary.slice(0, contentLimit).trimEnd()}\n[truncated]`;
+    return this.truncateCompactionSummary(existingSummary, newSummary, maxCharacters);
+  }
+
+  private findSafeCompactionSplitIndex(
+    messages: Message[],
+    desiredSplitIndex: number
+  ): number {
+    let splitIndex = Math.max(0, Math.min(messages.length, desiredSplitIndex));
+
+    while (
+      splitIndex > 0 &&
+      this.startsWithToolResultMessage(messages[splitIndex])
+    ) {
+      splitIndex--;
+    }
+
+    return splitIndex;
+  }
+
+  private startsWithToolResultMessage(message: Message | undefined): boolean {
+    return (
+      Boolean(message) &&
+      message?.role === "user" &&
+      Array.isArray(message.content) &&
+      message.content.some((block) => block.type === "tool_result")
+    );
+  }
+
+  private truncateCompactionSummary(
+    existingSummary: string | undefined,
+    newSummary: string,
+    maxCharacters: number
+  ): string {
+    const truncatedSuffix = "\n[truncated]";
+    if (!existingSummary) {
+      const summary = `${COMPACTION_SUMMARY_HEADER}\n${newSummary}`;
+      const contentLimit = Math.max(0, maxCharacters - truncatedSuffix.length);
+      return `${summary.slice(0, contentLimit).trimEnd()}${truncatedSuffix}`;
+    }
+
+    const marker = "[earlier summary truncated]";
+    const prefix = `${COMPACTION_SUMMARY_HEADER}\n${marker}\n`;
+    const existingBody = existingSummary.replace(COMPACTION_SUMMARY_HEADER, "").trim();
+
+    if (prefix.length + newSummary.length <= maxCharacters) {
+      const existingLimit = Math.max(
+        0,
+        maxCharacters - prefix.length - newSummary.length - 1
+      );
+      const existingTail = existingBody.slice(-existingLimit).trim();
+      return [prefix.trimEnd(), existingTail, newSummary]
+        .filter(Boolean)
+        .join("\n");
+    }
+
+    const contentLimit = Math.max(
+      0,
+      maxCharacters - prefix.length - truncatedSuffix.length
+    );
+    return `${prefix}${newSummary.slice(0, contentLimit).trimEnd()}${truncatedSuffix}`;
   }
 
   private extractCompactionSummary(message: Message | undefined): string | undefined {

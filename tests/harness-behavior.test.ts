@@ -190,6 +190,7 @@ test("run compacts older messages when the approximate context budget is exceede
       ],
     },
   ];
+  const preservedToolUse = oldMessages[3];
   const preservedToolResult = oldMessages[4];
   const session = createSession(cwd, oldMessages);
   const requests: ChatParams[] = [];
@@ -219,7 +220,8 @@ test("run compacts older messages when the approximate context budget is exceede
       JSON.stringify(requests[0].messages[0].content),
       /Previous conversation summary/
     );
-    assert.deepEqual(requests[0].messages.slice(1, 3), [
+    assert.deepEqual(requests[0].messages.slice(1, 4), [
+      preservedToolUse,
       preservedToolResult,
       { role: "user", content: "Current request" },
     ]);
@@ -230,7 +232,8 @@ test("run compacts older messages when the approximate context budget is exceede
       JSON.stringify(saved.messages[0].content),
       /Previous conversation summary/
     );
-    assert.deepEqual(saved.messages.slice(1, 3), [
+    assert.deepEqual(saved.messages.slice(1, 4), [
+      preservedToolUse,
       preservedToolResult,
       { role: "user", content: "Current request" },
     ]);
@@ -248,8 +251,62 @@ test("run compacts older messages when the approximate context budget is exceede
       events.map((event) => event.type),
       ["user_message", "conversation_compaction", "assistant_response"]
     );
-    assert.equal(events[1].data.summarizedMessages, 4);
-    assert.equal(events[1].data.preservedRecentMessages, 2);
+    assert.equal(events[1].data.summarizedMessages, 3);
+    assert.equal(events[1].data.preservedRecentMessages, 3);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("repeated compaction keeps newly summarized messages when summary is capped", async () => {
+  const cwd = createTempDir();
+  const session = createSession(cwd, [
+    {
+      role: "user",
+      content: [
+        {
+          type: "text",
+          text: `Previous conversation summary:\n${"old summary ".repeat(80)}`,
+        },
+      ],
+    },
+    { role: "user", content: `Important new request ${"a".repeat(20)}` },
+    {
+      role: "assistant",
+      content: [
+        {
+          type: "text",
+          text: `Important new answer ${"b".repeat(20)}`,
+        },
+      ],
+    },
+  ]);
+  const provider: ModelProvider = {
+    async chat() {
+      return {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "Done" }],
+      };
+    },
+  };
+  const { loop, sessionStore } = createHarness(cwd, provider, {
+    contextBudget: {
+      thresholdTokens: 80,
+      preserveRecentMessages: 1,
+      summaryMaxCharacters: 220,
+    },
+  });
+
+  try {
+    await silenceConsole(() => loop.run(session, "Current request"));
+
+    const saved = await sessionStore.load(session.id);
+    assert.ok(saved);
+    const summary = JSON.stringify(saved.messages[0].content);
+    assert.match(summary, /Previous conversation summary/);
+    assert.match(summary, /earlier summary truncated/);
+    assert.match(summary, /Important new request/);
+    assert.match(summary, /Important new answer/);
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
