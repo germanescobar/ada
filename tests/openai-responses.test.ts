@@ -34,6 +34,7 @@ test("messagesToInputItems converts an assistant text message", () => {
 
   const items = messagesToInputItems(messages);
 
+  // String assistant content is passed through as-is (the API accepts it).
   assert.equal(items.length, 1);
   assert.deepEqual(items[0], {
     type: "message",
@@ -57,6 +58,24 @@ test("messagesToInputItems converts content blocks with text", () => {
     type: "message",
     role: "user",
     content: [{ type: "input_text", text: "Read the file" }],
+  });
+});
+
+test("messagesToInputItems emits output_text for assistant content blocks", () => {
+  const messages: Message[] = [
+    {
+      role: "assistant",
+      content: [{ type: "text", text: "Here is the result." }],
+    },
+  ];
+
+  const items = messagesToInputItems(messages);
+
+  assert.equal(items.length, 1);
+  assert.deepEqual(items[0], {
+    type: "message",
+    role: "assistant",
+    content: [{ type: "output_text", text: "Here is the result.", annotations: [] }],
   });
 });
 
@@ -133,7 +152,7 @@ test("messagesToInputItems splits mixed content blocks into separate items", () 
   assert.deepEqual(items[0], {
     type: "message",
     role: "assistant",
-    content: [{ type: "input_text", text: "Let me read that file." }],
+    content: [{ type: "output_text", text: "Let me read that file.", annotations: [] }],
   });
   assert.deepEqual(items[1], {
     type: "function_call",
@@ -182,7 +201,7 @@ test("messagesToInputItems handles a full multi-turn conversation", () => {
   assert.deepEqual(items[1], {
     type: "message",
     role: "assistant",
-    content: [{ type: "input_text", text: "Sure, I'll create it." }],
+    content: [{ type: "output_text", text: "Sure, I'll create it.", annotations: [] }],
   });
   assert.deepEqual(items[2], {
     type: "function_call",

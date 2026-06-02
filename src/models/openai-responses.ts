@@ -87,15 +87,29 @@ export function messagesToInputItems(
     );
 
     // Emit a message item for any text content.
+    // Assistant messages represent previous model outputs and must use
+    // `output_text` content parts; user messages use `input_text`.
     if (textBlocks.length > 0) {
-      items.push({
-        type: "message",
-        role: msg.role as "user" | "assistant",
-        content: textBlocks.map((b) => ({
-          type: "input_text" as const,
-          text: (b as { type: "text"; text: string }).text,
-        })),
-      });
+      if (msg.role === "assistant") {
+        items.push({
+          type: "message",
+          role: "assistant",
+          content: textBlocks.map((b) => ({
+            type: "output_text" as const,
+            text: (b as { type: "text"; text: string }).text,
+            annotations: [],
+          })),
+        });
+      } else {
+        items.push({
+          type: "message",
+          role: "user",
+          content: textBlocks.map((b) => ({
+            type: "input_text" as const,
+            text: (b as { type: "text"; text: string }).text,
+          })),
+        });
+      }
     }
 
     // Assistant tool-use blocks become function_call items.
