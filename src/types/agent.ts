@@ -1,3 +1,4 @@
+import type { ConversationItem, ConversationReasoningItem } from "./conversation.js";
 import type { Message, ContentBlock } from "./messages.js";
 
 export type SessionStatus = "active" | "paused" | "completed" | "archived";
@@ -7,6 +8,7 @@ export interface SessionState {
   title?: string;
   workingDirectory: string;
   model: string; // e.g., "anthropic/claude-sonnet-4-6"
+  conversationItems: ConversationItem[];
   messages: Message[];
   contextBudget?: SessionContextBudget;
   createdAt: string;
@@ -28,6 +30,7 @@ export interface ModelResponse {
   stopReason: StopReason;
   content: ContentBlock[];
   reasoning?: string;
+  reasoningItems?: ConversationReasoningItem[];
   usage?: ModelUsage;
 }
 

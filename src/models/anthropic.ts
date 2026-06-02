@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { ChatParams, ModelProvider } from "./provider.js";
 import type { ModelResponse } from "../types/agent.js";
+import { conversationItemsToMessages } from "../types/conversation.js";
 import type { Message, ContentBlock } from "../types/messages.js";
 import type { ToolSchema } from "../types/tools.js";
 
@@ -18,7 +19,9 @@ export class AnthropicProvider implements ModelProvider {
       model: this.model,
       max_tokens: 16384,
       system: params.systemPrompt,
-      messages: params.messages.map((m) => this.toAnthropicMessage(m)),
+      messages: conversationItemsToMessages(params.conversationItems).map((m) =>
+        this.toAnthropicMessage(m)
+      ),
       tools: params.tools.map((t) => this.toAnthropicTool(t)),
     });
 

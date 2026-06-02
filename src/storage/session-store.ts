@@ -1,6 +1,10 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { SessionState } from "../types/agent.js";
+import {
+  conversationItemsToMessages,
+  messagesToConversationItems,
+} from "../types/conversation.js";
 
 export class SessionStore {
   private baseDir: string;
@@ -12,14 +16,14 @@ export class SessionStore {
   async save(session: SessionState): Promise<void> {
     await fs.mkdir(this.baseDir, { recursive: true });
     const filePath = path.join(this.baseDir, `${session.id}.json`);
-    await fs.writeFile(filePath, JSON.stringify(session, null, 2));
+    await fs.writeFile(filePath, JSON.stringify(this.normalize(session), null, 2));
   }
 
   async load(sessionId: string): Promise<SessionState | null> {
     const filePath = path.join(this.baseDir, `${sessionId}.json`);
     try {
       const content = await fs.readFile(filePath, "utf-8");
-      return JSON.parse(content) as SessionState;
+      return this.normalize(JSON.parse(content) as SessionState);
     } catch {
       return null;
     }
@@ -35,7 +39,7 @@ export class SessionStore {
           path.join(this.baseDir, file),
           "utf-8"
         );
-        const session = JSON.parse(content) as SessionState;
+        const session = this.normalize(JSON.parse(content) as SessionState);
         if (!includeArchived && session.status === "archived") continue;
         sessions.push(session);
       }
@@ -62,5 +66,14 @@ export class SessionStore {
   async getLatest(): Promise<SessionState | null> {
     const sessions = await this.list();
     return sessions[0] ?? null;
+  }
+
+  private normalize(session: SessionState): SessionState {
+    if (!Array.isArray(session.conversationItems)) {
+      session.conversationItems = messagesToConversationItems(session.messages ?? []);
+    }
+
+    session.messages = conversationItemsToMessages(session.conversationItems);
+    return session;
   }
 }

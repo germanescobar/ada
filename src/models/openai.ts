@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import type { ChatParams, ModelProvider } from "./provider.js";
 import type { ModelResponse } from "../types/agent.js";
+import { conversationItemsToMessages } from "../types/conversation.js";
 import type { Message, ContentBlock } from "../types/messages.js";
 import type { ToolSchema } from "../types/tools.js";
 
@@ -20,7 +21,10 @@ export class OpenAIProvider implements ModelProvider {
   }
 
   async chat(params: ChatParams): Promise<ModelResponse> {
-    const messages = this.toOpenAIMessages(params.systemPrompt, params.messages);
+    const messages = this.toOpenAIMessages(
+      params.systemPrompt,
+      conversationItemsToMessages(params.conversationItems)
+    );
     const tools = params.tools.map((t) => this.toOpenAITool(t));
 
     const response = await this.client.chat.completions.create({

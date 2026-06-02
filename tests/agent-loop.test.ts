@@ -87,6 +87,9 @@ test("run saves the user message before model failure", async () => {
 
     const saved = await sessionStore.load(session.id);
     assert.ok(saved);
+    assert.deepEqual(saved.conversationItems, [
+      { type: "message", role: "user", content: "Please inspect the project" },
+    ]);
     assert.equal(saved.title, "Please inspect the project");
     assert.deepEqual(saved.messages, [
       { role: "user", content: "Please inspect the project" },
@@ -146,6 +149,25 @@ test("run saves assistant responses and tool-result batches before later failure
 
     const saved = await sessionStore.load(session.id);
     assert.ok(saved);
+    assert.deepEqual(saved.conversationItems, [
+      { type: "message", role: "user", content: "Read the README" },
+      {
+        type: "function_call",
+        id: "tool-1",
+        name: "read_file",
+        input: { path: "README.md" },
+      },
+      {
+        type: "function_output",
+        callId: "tool-1",
+        content: "file contents",
+        metadata: {
+          bytes: 13,
+          lineCount: 1,
+          truncated: false,
+        },
+      },
+    ]);
     assert.deepEqual(saved.messages, [
       { role: "user", content: "Read the README" },
       {

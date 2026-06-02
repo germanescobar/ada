@@ -17,6 +17,7 @@ export class SessionManager {
       id: uuidv4(),
       workingDirectory,
       model,
+      conversationItems: [],
       messages: [],
       createdAt: new Date().toISOString(),
       lastActiveAt: new Date().toISOString(),
