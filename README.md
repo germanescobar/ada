@@ -112,6 +112,16 @@ Use a different AI model:
 ada chat "Your message here" --model ollama/glm-4.7-flash:latest
 ```
 
+### Context Compaction
+
+Ada tracks an approximate context budget for each session. When a transcript exceeds the threshold, older messages are replaced with a summary while recent messages, including recent tool calls and tool results, remain available verbatim.
+
+```bash
+ada chat "Continue the refactor" --context-threshold-tokens 120000 --context-preserve-messages 8
+```
+
+By default, compaction starts around 120,000 estimated tokens and preserves the 8 most recent messages.
+
 ### Ollama Cloud
 
 Use a supported Ollama Cloud model with the `ollama-cloud/` provider. This is separate from the local `ollama/` provider, which still targets a local Ollama daemon.

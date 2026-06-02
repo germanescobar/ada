@@ -10,6 +10,18 @@ import { ContextBuilder } from "./context-builder.js";
 import { Executor } from "./executor.js";
 
 const MAX_ITERATIONS = 50;
+const COMPACTION_SUMMARY_HEADER = "Previous conversation summary:";
+export const DEFAULT_CONTEXT_BUDGET: ContextBudgetOptions = {
+  thresholdTokens: 120_000,
+  preserveRecentMessages: 8,
+  summaryMaxCharacters: 6_000,
+};
+
+export interface ContextBudgetOptions {
+  thresholdTokens: number;
+  preserveRecentMessages: number;
+  summaryMaxCharacters?: number;
+}
 
 export class AgentLoop {
   constructor(
@@ -19,7 +31,8 @@ export class AgentLoop {
     private registry: ToolRegistry,
     private eventStore: EventStore,
     private sessionStore: SessionStore,
-    private streamJson = false
+    private streamJson = false,
+    private contextBudget: ContextBudgetOptions = DEFAULT_CONTEXT_BUDGET
   ) {}
 
   async run(session: SessionState, userMessage: string): Promise<void> {
@@ -48,6 +61,7 @@ export class AgentLoop {
       });
 
       for (let i = 0; i < MAX_ITERATIONS; i++) {
+        await this.compactSessionIfNeeded(session);
         const messages = await this.contextBuilder.buildMessagesWithDynamicContext(
           session.messages
         );
@@ -69,6 +83,7 @@ export class AgentLoop {
           reasoning: response.reasoning,
           usage: response.usage,
         });
+        this.updateContextBudget(session, response.usage);
 
         const assistantMessage: Message = {
           role: "assistant",
@@ -207,6 +222,118 @@ export class AgentLoop {
   private async saveSession(session: SessionState): Promise<void> {
     session.lastActiveAt = new Date().toISOString();
     await this.sessionStore.save(session);
+  }
+
+  private async compactSessionIfNeeded(session: SessionState): Promise<void> {
+    const beforeTokens = this.estimateMessagesTokens(session.messages);
+    this.updateContextBudget(session);
+
+    if (beforeTokens <= this.contextBudget.thresholdTokens) return;
+
+    const existingSummary = this.extractCompactionSummary(session.messages[0]);
+    const compactableMessages = existingSummary
+      ? session.messages.slice(1)
+      : session.messages;
+    const preserveCount = Math.max(1, this.contextBudget.preserveRecentMessages);
+
+    if (compactableMessages.length <= preserveCount) return;
+
+    const splitIndex = compactableMessages.length - preserveCount;
+    const olderMessages = compactableMessages.slice(0, splitIndex);
+    const recentMessages = compactableMessages.slice(splitIndex);
+    const summary = this.buildCompactionSummary(existingSummary, olderMessages);
+
+    session.messages = [
+      {
+        role: "user",
+        content: [{ type: "text", text: summary }],
+      },
+      ...recentMessages,
+    ];
+
+    const afterTokens = this.estimateMessagesTokens(session.messages);
+    const compactedAt = new Date().toISOString();
+    session.contextBudget = {
+      ...session.contextBudget,
+      approximateTokens: afterTokens,
+      thresholdTokens: this.contextBudget.thresholdTokens,
+      preservedRecentMessages: recentMessages.length,
+      compactedAt,
+    };
+
+    await this.eventStore.append(session.id, "conversation_compaction", {
+      beforeApproximateTokens: beforeTokens,
+      afterApproximateTokens: afterTokens,
+      beforeMessages: compactableMessages.length + (existingSummary ? 1 : 0),
+      afterMessages: session.messages.length,
+      summarizedMessages: olderMessages.length,
+      preservedRecentMessages: recentMessages.length,
+    });
+    await this.saveSession(session);
+  }
+
+  private updateContextBudget(
+    session: SessionState,
+    usage?: { inputTokens: number; outputTokens: number }
+  ): void {
+    session.contextBudget = {
+      ...session.contextBudget,
+      approximateTokens: this.estimateMessagesTokens(session.messages),
+      thresholdTokens: this.contextBudget.thresholdTokens,
+      preservedRecentMessages: this.contextBudget.preserveRecentMessages,
+      lastProviderUsage: usage ?? session.contextBudget?.lastProviderUsage,
+    };
+  }
+
+  private estimateMessagesTokens(messages: Message[]): number {
+    const characters = messages.reduce(
+      (total, message) => total + this.messageToText(message).length,
+      0
+    );
+    return Math.ceil(characters / 4);
+  }
+
+  private buildCompactionSummary(
+    existingSummary: string | undefined,
+    messages: Message[]
+  ): string {
+    const lines = [
+      existingSummary ?? COMPACTION_SUMMARY_HEADER,
+      ...messages.map((message) => `- ${message.role}: ${this.messageToText(message)}`),
+    ].filter((line): line is string => Boolean(line));
+
+    const summary = lines.join("\n");
+    const maxCharacters = this.contextBudget.summaryMaxCharacters;
+    if (!maxCharacters || summary.length <= maxCharacters) return summary;
+
+    const contentLimit = Math.max(0, maxCharacters - 15);
+    return `${summary.slice(0, contentLimit).trimEnd()}\n[truncated]`;
+  }
+
+  private extractCompactionSummary(message: Message | undefined): string | undefined {
+    if (!message || message.role !== "user") return undefined;
+    const text = this.messageToText(message);
+    if (!text.startsWith(COMPACTION_SUMMARY_HEADER)) return undefined;
+    return text;
+  }
+
+  private messageToText(message: Message): string {
+    if (typeof message.content === "string") return message.content;
+
+    return message.content
+      .map((block) => {
+        switch (block.type) {
+          case "text":
+            return block.text;
+          case "tool_use":
+            return `tool_use ${block.id} ${block.name} ${JSON.stringify(block.input)}`;
+          case "tool_result":
+            return `tool_result ${block.toolUseId} ${
+              block.isError ? "error" : "ok"
+            } ${block.content} ${JSON.stringify(block.metadata ?? {})}`;
+        }
+      })
+      .join("\n");
   }
 
   private createErrorToolResult(

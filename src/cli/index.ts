@@ -1,7 +1,7 @@
 import readline from "node:readline";
 import path from "node:path";
 import chalk from "chalk";
-import { Command } from "commander";
+import { Command, InvalidArgumentError } from "commander";
 
 import { EventStore } from "../storage/event-store.js";
 import { SessionStore } from "../storage/session-store.js";
@@ -14,7 +14,11 @@ import { deleteFileTool } from "../tools/delete-file.js";
 import { PolicyEngine } from "../agent/policies.js";
 import { ContextBuilder } from "../agent/context-builder.js";
 import { Executor } from "../agent/executor.js";
-import { AgentLoop } from "../agent/loop.js";
+import {
+  AgentLoop,
+  DEFAULT_CONTEXT_BUDGET,
+  type ContextBudgetOptions,
+} from "../agent/loop.js";
 import { SessionManager } from "../agent/session.js";
 import {
   createProvider,
@@ -45,6 +49,35 @@ export function formatModelOptions(
       return [group.group, ...lines].join("\n");
     })
     .join("\n\n");
+}
+
+function parsePositiveInteger(value: string): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new InvalidArgumentError("must be a positive integer");
+  }
+  return parsed;
+}
+
+function buildContextBudgetOptions(options: {
+  contextThresholdTokens?: number;
+  contextPreserveMessages?: number;
+}): ContextBudgetOptions | undefined {
+  if (
+    options.contextThresholdTokens === undefined &&
+    options.contextPreserveMessages === undefined
+  ) {
+    return undefined;
+  }
+
+  return {
+    ...DEFAULT_CONTEXT_BUDGET,
+    thresholdTokens:
+      options.contextThresholdTokens ?? DEFAULT_CONTEXT_BUDGET.thresholdTokens,
+    preserveRecentMessages:
+      options.contextPreserveMessages ??
+      DEFAULT_CONTEXT_BUDGET.preserveRecentMessages,
+  };
 }
 
 async function askApproval(
@@ -99,6 +132,16 @@ export function createCLI() {
     .option("--model <model>", "Model to use (provider/model)")
     .option("--stream-json", "Emit structured JSON events to stdout")
     .option("--auto-approve", "Auto-approve tool calls (dangerous commands are still denied)")
+    .option(
+      "--context-threshold-tokens <tokens>",
+      "Approximate token threshold before compacting session history",
+      parsePositiveInteger
+    )
+    .option(
+      "--context-preserve-messages <count>",
+      "Recent message count to keep verbatim during compaction",
+      parsePositiveInteger
+    )
     .action(async (
       message: string,
       options: {
@@ -106,6 +149,8 @@ export function createCLI() {
         model?: string;
         autoApprove?: boolean;
         streamJson?: boolean;
+        contextThresholdTokens?: number;
+        contextPreserveMessages?: number;
       }
     ) => {
       const parentOpts = program.opts() as {
@@ -116,6 +161,7 @@ export function createCLI() {
       const model = options.model ?? parentOpts.model;
       const autoApprove = options.autoApprove ?? parentOpts.autoApprove;
       const streamJson = options.streamJson ?? parentOpts.streamJson ?? false;
+      const contextBudget = buildContextBudgetOptions(options);
       const cwd = process.cwd();
       const paths = getStoragePaths(cwd);
 
@@ -158,7 +204,8 @@ export function createCLI() {
         registry,
         eventStore,
         sessionStore,
-        streamJson
+        streamJson,
+        contextBudget
       );
 
       if (!streamJson) {

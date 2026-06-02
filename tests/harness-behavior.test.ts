@@ -7,6 +7,7 @@ import test from "node:test";
 import { ContextBuilder } from "../src/agent/context-builder.js";
 import { Executor } from "../src/agent/executor.js";
 import { AgentLoop } from "../src/agent/loop.js";
+import type { ContextBudgetOptions } from "../src/agent/loop.js";
 import { PolicyEngine } from "../src/agent/policies.js";
 import type { ChatParams, ModelProvider } from "../src/models/provider.js";
 import { EventStore } from "../src/storage/event-store.js";
@@ -56,6 +57,7 @@ function createHarness(
     registry?: ToolRegistry;
     policyEngine?: PolicyEngine;
     approve?: () => Promise<boolean>;
+    contextBudget?: ContextBudgetOptions;
   } = {}
 ): { loop: AgentLoop; eventStore: EventStore; sessionStore: SessionStore } {
   const eventStore = new EventStore(path.join(cwd, "events"));
@@ -74,7 +76,9 @@ function createHarness(
       new ContextBuilder(cwd),
       options.registry ?? new ToolRegistry(),
       eventStore,
-      sessionStore
+      sessionStore,
+      false,
+      options.contextBudget
     ),
     eventStore,
     sessionStore,
@@ -150,6 +154,102 @@ test("run preserves prior messages and passes deterministic tool schemas", async
         content: [{ type: "text", text: "Done" }],
       },
     ]);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("run compacts older messages when the approximate context budget is exceeded", async () => {
+  const cwd = createTempDir();
+  const oldMessages: Message[] = [
+    { role: "user", content: "Earlier request " + "x".repeat(160) },
+    {
+      role: "assistant",
+      content: [{ type: "text", text: "Earlier answer " + "y".repeat(160) }],
+    },
+    { role: "user", content: "Second request " + "z".repeat(160) },
+    {
+      role: "assistant",
+      content: [
+        {
+          type: "tool_use",
+          id: "old-tool",
+          name: "read_file",
+          input: { path: "old.txt" },
+        },
+      ],
+    },
+    {
+      role: "user",
+      content: [
+        {
+          type: "tool_result",
+          toolUseId: "old-tool",
+          content: "old result " + "r".repeat(160),
+        },
+      ],
+    },
+  ];
+  const preservedToolResult = oldMessages[4];
+  const session = createSession(cwd, oldMessages);
+  const requests: ChatParams[] = [];
+  const provider: ModelProvider = {
+    async chat(request) {
+      requests.push(request);
+      return {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "Done" }],
+      };
+    },
+  };
+  const { loop, eventStore, sessionStore } = createHarness(cwd, provider, {
+    contextBudget: {
+      thresholdTokens: 80,
+      preserveRecentMessages: 2,
+      summaryMaxCharacters: 2_000,
+    },
+  });
+
+  try {
+    await silenceConsole(() => loop.run(session, "Current request"));
+
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].messages[0].role, "user");
+    assert.match(
+      JSON.stringify(requests[0].messages[0].content),
+      /Previous conversation summary/
+    );
+    assert.deepEqual(requests[0].messages.slice(1, 3), [
+      preservedToolResult,
+      { role: "user", content: "Current request" },
+    ]);
+
+    const saved = await sessionStore.load(session.id);
+    assert.ok(saved);
+    assert.match(
+      JSON.stringify(saved.messages[0].content),
+      /Previous conversation summary/
+    );
+    assert.deepEqual(saved.messages.slice(1, 3), [
+      preservedToolResult,
+      { role: "user", content: "Current request" },
+    ]);
+    assert.deepEqual(saved.messages.at(-1), {
+      role: "assistant",
+      content: [{ type: "text", text: "Done" }],
+    });
+    assert.ok(saved.contextBudget);
+    assert.equal(saved.contextBudget.thresholdTokens, 80);
+    assert.equal(saved.contextBudget.preservedRecentMessages, 2);
+    assert.ok(saved.contextBudget.compactedAt);
+
+    const events = await eventStore.getEvents(session.id);
+    assert.deepEqual(
+      events.map((event) => event.type),
+      ["user_message", "conversation_compaction", "assistant_response"]
+    );
+    assert.equal(events[1].data.summarizedMessages, 4);
+    assert.equal(events[1].data.preservedRecentMessages, 2);
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }

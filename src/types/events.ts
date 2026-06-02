@@ -3,6 +3,7 @@ export type EventType =
   | "user_message"
   | "assistant_reasoning"
   | "assistant_response"
+  | "conversation_compaction"
   | "tool_call"
   | "tool_result"
   | "policy_decision"
