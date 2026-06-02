@@ -136,7 +136,9 @@ Supported Ollama Cloud models:
 - `ollama-cloud/glm-5.1`
 - `ollama-cloud/minimax-m2.7`
 - `ollama-cloud/deepseek-v3.2`
+- `ollama-cloud/deepseek-v4-pro`
 - `ollama-cloud/kimi-k2.6`
+- `ollama-cloud/kimi-k2-thinking`
 
 ### JSON Event Streaming
 
@@ -264,7 +266,9 @@ Available providers (provider/model format):
 - `ollama-cloud/glm-5.1`
 - `ollama-cloud/minimax-m2.7`
 - `ollama-cloud/deepseek-v3.2`
+- `ollama-cloud/deepseek-v4-pro`
 - `ollama-cloud/kimi-k2.6`
+- `ollama-cloud/kimi-k2-thinking`
 
 `ollama/<local-model>` targets `http://localhost:11434/v1`. `ollama-cloud/<model>` targets Ollama Cloud and uses `OLLAMA_API_KEY`.
 

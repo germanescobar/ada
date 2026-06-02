@@ -13,4 +13,6 @@ test("formatModelOptions lists models grouped by provider", () => {
   assert.match(output, /anthropic\/claude-sonnet-4-6\s+Claude Sonnet 4\.6/);
   assert.match(output, /ollama\/glm-4\.7-flash:latest\s+GLM 4\.7 Flash \(local\)/);
   assert.match(output, /ollama-cloud\/glm-5\.1\s+glm-5\.1 \(cloud\)/);
+  assert.match(output, /ollama-cloud\/deepseek-v4-pro\s+deepseek-v4-pro \(cloud\)/);
+  assert.match(output, /ollama-cloud\/kimi-k2-thinking\s+kimi-k2-thinking \(cloud\)/);
 });

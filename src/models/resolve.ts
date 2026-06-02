@@ -13,7 +13,9 @@ export const OLLAMA_CLOUD_MODELS = [
   "glm-5.1",
   "minimax-m2.7",
   "deepseek-v3.2",
+  "deepseek-v4-pro",
   "kimi-k2.6",
+  "kimi-k2-thinking",
 ] as const;
 
 export type ModelOptionGroupName =
