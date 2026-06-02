@@ -14,8 +14,23 @@ export type StreamEvent =
       text: string;
     }
   | {
+      type: "assistant.reasoning.delta";
+      text: string;
+    }
+  | {
       type: "assistant.text";
       text: string;
+    }
+  | {
+      type: "assistant.text.delta";
+      text: string;
+    }
+  | {
+      type: "tool.call.delta";
+      index: number;
+      id?: string;
+      name?: string;
+      inputDelta?: string;
     }
   | {
       type: "tool.call";

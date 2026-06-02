@@ -1,9 +1,10 @@
 import chalk from "chalk";
-import type { ModelProvider } from "../models/provider.js";
+import type { ModelProvider, ModelStreamEvent } from "../models/provider.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { EventStore } from "../storage/event-store.js";
 import type { SessionStore } from "../storage/session-store.js";
 import type { SessionState } from "../types/agent.js";
+import type { ModelResponse } from "../types/agent.js";
 import {
   contentBlocksToConversationItems,
   conversationItemToText,
@@ -31,6 +32,8 @@ export interface ContextBudgetOptions {
 }
 
 export class AgentLoop {
+  private pendingTerminalDelta = false;
+
   constructor(
     private provider: ModelProvider,
     private executor: Executor,
@@ -76,7 +79,7 @@ export class AgentLoop {
         const conversationItems = await this.contextBuilder.buildItemsWithDynamicContext(
           session.conversationItems
         );
-        const response = await this.provider.chat({
+        const response = await this.getModelResponse({
           systemPrompt,
           conversationItems,
           messages: conversationItemsToMessages(conversationItems),
@@ -103,14 +106,16 @@ export class AgentLoop {
           response.reasoningItems
         );
 
-        if (response.reasoning) {
+        if (response.reasoning && !response.streamed) {
           this.emit({ type: "assistant.reasoning", text: response.reasoning });
         }
 
         // Print any text blocks
-        for (const block of response.content) {
-          if (block.type === "text") {
-            this.emit({ type: "assistant.text", text: block.text });
+        if (!response.streamed) {
+          for (const block of response.content) {
+            if (block.type === "text") {
+              this.emit({ type: "assistant.text", text: block.text });
+            }
           }
         }
 
@@ -438,6 +443,51 @@ export class AgentLoop {
     session.messages = conversationItemsToMessages(session.conversationItems);
   }
 
+  private async getModelResponse(
+    params: Parameters<ModelProvider["chat"]>[0]
+  ): Promise<ModelResponse & { streamed?: boolean }> {
+    if (!this.provider.streamChat) {
+      return this.provider.chat(params);
+    }
+
+    let response: ModelResponse | undefined;
+    for await (const event of this.provider.streamChat(params)) {
+      if (event.type === "response") {
+        response = event.response;
+        continue;
+      }
+      this.emitModelStreamEvent(event);
+    }
+
+    if (!response) {
+      throw new Error("Streaming model provider completed without a final response.");
+    }
+
+    return { ...response, streamed: true };
+  }
+
+  private emitModelStreamEvent(event: ModelStreamEvent): void {
+    switch (event.type) {
+      case "assistant_text_delta":
+        this.emit({ type: "assistant.text.delta", text: event.text });
+        return;
+      case "assistant_reasoning_delta":
+        this.emit({ type: "assistant.reasoning.delta", text: event.text });
+        return;
+      case "tool_call_delta":
+        this.emit({
+          type: "tool.call.delta",
+          index: event.index,
+          id: event.id,
+          name: event.name,
+          inputDelta: event.inputDelta,
+        });
+        return;
+      case "response":
+        return;
+    }
+  }
+
   private emit(event: StreamEvent): void {
     if (this.streamJson) {
       console.log(JSON.stringify(event));
@@ -446,19 +496,39 @@ export class AgentLoop {
 
     switch (event.type) {
       case "run.started":
+        return;
       case "run.completed":
       case "run.failed":
+        this.finishPendingTerminalDelta();
+        return;
+      case "assistant.text.delta":
+        process.stdout.write(chalk.cyan(event.text));
+        this.pendingTerminalDelta = true;
         return;
       case "assistant.text":
+        this.finishPendingTerminalDelta();
         console.log(chalk.cyan(event.text));
         return;
+      case "assistant.reasoning.delta":
+        process.stdout.write(chalk.magenta(event.text));
+        this.pendingTerminalDelta = true;
+        return;
       case "assistant.reasoning":
+        this.finishPendingTerminalDelta();
         console.log(chalk.magenta(event.text));
         return;
+      case "tool.call.delta":
+        this.finishPendingTerminalDelta();
+        if (event.name) {
+          console.log(chalk.yellow(`→ ${event.name}(...)`));
+        }
+        return;
       case "tool.call":
+        this.finishPendingTerminalDelta();
         console.log(chalk.yellow(`→ ${event.name}(${JSON.stringify(event.input)})`));
         return;
       case "tool.result": {
+        this.finishPendingTerminalDelta();
         const preview = event.content.slice(0, 500);
         console.log(
           event.isError ? chalk.red(`  ✗ ${preview}`) : chalk.gray(`  ${preview}`)
@@ -466,5 +536,11 @@ export class AgentLoop {
         return;
       }
     }
+  }
+
+  private finishPendingTerminalDelta(): void {
+    if (!this.pendingTerminalDelta) return;
+    process.stdout.write("\n");
+    this.pendingTerminalDelta = false;
   }
 }

@@ -36,7 +36,8 @@ function createLoop(
   provider: ModelProvider,
   executeTool: (toolCall: ToolCall) => Promise<ToolResult> = async () => ({
     content: "unused",
-  })
+  }),
+  streamJson = false
 ): { loop: AgentLoop; eventStore: EventStore; sessionStore: SessionStore } {
   const eventStore = new EventStore(path.join(cwd, "events"));
   const sessionStore = new SessionStore(path.join(cwd, "sessions"));
@@ -52,7 +53,8 @@ function createLoop(
       new ContextBuilder(cwd),
       new ToolRegistry(),
       eventStore,
-      sessionStore
+      sessionStore,
+      streamJson
     ),
     eventStore,
     sessionStore,
@@ -64,6 +66,21 @@ async function silenceConsole<T>(fn: () => Promise<T>): Promise<T> {
   console.log = () => {};
   try {
     return await fn();
+  } finally {
+    console.log = originalLog;
+  }
+}
+
+async function captureConsole<T>(
+  fn: () => Promise<T>
+): Promise<{ result: T; lines: string[] }> {
+  const originalLog = console.log;
+  const lines: string[] = [];
+  console.log = (value?: unknown) => {
+    lines.push(String(value));
+  };
+  try {
+    return { result: await fn(), lines };
   } finally {
     console.log = originalLog;
   }
@@ -292,6 +309,127 @@ test("run saves synthetic error tool results when tool execution throws", async 
     assert.deepEqual(
       events.map((event) => event.type),
       ["user_message", "assistant_response", "error"]
+    );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("run emits normalized stream-json model deltas before tool execution", async () => {
+  const cwd = createTempDir();
+  const session = createSession(cwd);
+  let modelCalls = 0;
+  const provider: ModelProvider = {
+    async chat() {
+      throw new Error("non-streaming chat should not be used");
+    },
+    async *streamChat() {
+      modelCalls += 1;
+      if (modelCalls === 1) {
+        yield { type: "assistant_text_delta", text: "Reading " };
+        yield { type: "assistant_text_delta", text: "the file." };
+        yield {
+          type: "tool_call_delta",
+          index: 0,
+          id: "tool-1",
+          name: "read_file",
+          inputDelta: '{"path":"README.md"}',
+        };
+        yield {
+          type: "response",
+          response: {
+            stopReason: "tool_use",
+            content: [
+              { type: "text", text: "Reading the file." },
+              {
+                type: "tool_use",
+                id: "tool-1",
+                name: "read_file",
+                input: { path: "README.md" },
+              },
+            ],
+          },
+        };
+        return;
+      }
+
+      yield { type: "assistant_text_delta", text: "Done." };
+      yield {
+        type: "response",
+        response: {
+          stopReason: "end_turn",
+          content: [{ type: "text", text: "Done." }],
+        },
+      };
+    },
+  };
+  const { loop, eventStore, sessionStore } = createLoop(
+    cwd,
+    provider,
+    async () => ({ content: "file contents" }),
+    true
+  );
+
+  try {
+    const { lines } = await captureConsole(() =>
+      loop.run(session, "Read the README")
+    );
+    const streamEvents = lines.map((line) => JSON.parse(line) as { type: string });
+
+    assert.deepEqual(
+      streamEvents.map((event) => event.type),
+      [
+        "run.started",
+        "assistant.text.delta",
+        "assistant.text.delta",
+        "tool.call.delta",
+        "tool.call",
+        "tool.result",
+        "assistant.text.delta",
+        "run.completed",
+      ]
+    );
+    assert.deepEqual(JSON.parse(lines[3]), {
+      type: "tool.call.delta",
+      index: 0,
+      id: "tool-1",
+      name: "read_file",
+      inputDelta: '{"path":"README.md"}',
+    });
+
+    const saved = await sessionStore.load(session.id);
+    assert.ok(saved);
+    assert.deepEqual(saved.conversationItems, [
+      { type: "message", role: "user", content: "Read the README" },
+      {
+        type: "message",
+        role: "assistant",
+        content: "Reading the file.",
+        contentFormat: "block",
+      },
+      {
+        type: "function_call",
+        id: "tool-1",
+        name: "read_file",
+        input: { path: "README.md" },
+      },
+      {
+        type: "function_output",
+        callId: "tool-1",
+        content: "file contents",
+      },
+      {
+        type: "message",
+        role: "assistant",
+        content: "Done.",
+        contentFormat: "block",
+      },
+    ]);
+
+    const events = await eventStore.getEvents(session.id);
+    assert.deepEqual(
+      events.map((event) => event.type),
+      ["user_message", "assistant_response", "assistant_response"]
     );
   } finally {
     rmSync(cwd, { recursive: true, force: true });

@@ -12,4 +12,26 @@ export interface ChatParams {
 
 export interface ModelProvider {
   chat(params: ChatParams): Promise<ModelResponse>;
+  streamChat?(params: ChatParams): AsyncIterable<ModelStreamEvent>;
 }
+
+export type ModelStreamEvent =
+  | {
+      type: "assistant_text_delta";
+      text: string;
+    }
+  | {
+      type: "assistant_reasoning_delta";
+      text: string;
+    }
+  | {
+      type: "tool_call_delta";
+      index: number;
+      id?: string;
+      name?: string;
+      inputDelta?: string;
+    }
+  | {
+      type: "response";
+      response: ModelResponse;
+    };
