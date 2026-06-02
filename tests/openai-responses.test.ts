@@ -4,6 +4,7 @@ import test from "node:test";
 import type { ContentBlock, Message } from "../src/types/messages.js";
 import type { ToolSchema } from "../src/types/tools.js";
 import {
+  conversationItemsToInputItems,
   messagesToInputItems,
   toFunctionTool,
   responseToModelResponse,
@@ -238,6 +239,48 @@ test("messagesToInputItems skips assistant messages with only tool_use and no te
   assert.equal(items[0].type, "function_call");
 });
 
+test("conversationItemsToInputItems preserves reasoning and function-call identities", () => {
+  const items = conversationItemsToInputItems([
+    {
+      type: "reasoning",
+      id: "rs_123",
+      summary: "I should inspect the file.",
+      encryptedContent: "encrypted",
+    },
+    {
+      type: "function_call",
+      id: "call_1",
+      name: "read_file",
+      input: { path: "README.md" },
+    },
+    {
+      type: "function_output",
+      callId: "call_1",
+      content: "contents",
+    },
+  ]);
+
+  assert.deepEqual(items, [
+    {
+      type: "reasoning",
+      id: "rs_123",
+      summary: [{ type: "summary_text", text: "I should inspect the file." }],
+      encrypted_content: "encrypted",
+    },
+    {
+      type: "function_call",
+      call_id: "call_1",
+      name: "read_file",
+      arguments: JSON.stringify({ path: "README.md" }),
+    },
+    {
+      type: "function_call_output",
+      call_id: "call_1",
+      output: "contents",
+    },
+  ]);
+});
+
 // ─── toFunctionTool ──────────────────────────────────────────────────────
 
 test("toFunctionTool converts a ToolSchema to a Responses API function tool", () => {
@@ -373,6 +416,13 @@ test("responseToModelResponse extracts reasoning summaries", () => {
   const result = responseToModelResponse(response);
 
   assert.equal(result.reasoning, "I should read the file first.");
+  assert.deepEqual(result.reasoningItems, [
+    {
+      type: "reasoning",
+      id: "rs_1",
+      summary: "I should read the file first.",
+    },
+  ]);
   assert.deepEqual(result.content, [{ type: "text", text: "Let me check." }]);
 });
 

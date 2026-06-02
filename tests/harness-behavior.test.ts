@@ -363,7 +363,6 @@ test("policy-denied tool calls are returned as error tool results", async () => 
           toolUseId: "tool-1",
           content: 'Tool "run_command" was denied by policy.',
           isError: true,
-          metadata: undefined,
         },
       ],
     });

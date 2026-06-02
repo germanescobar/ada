@@ -1,6 +1,10 @@
 import OpenAI from "openai";
 import type { ChatParams, ModelProvider } from "./provider.js";
 import type { ModelResponse, StopReason } from "../types/agent.js";
+import {
+  type ConversationItem,
+  type ConversationReasoningItem,
+} from "../types/conversation.js";
 import type { ContentBlock, Message } from "../types/messages.js";
 import type { ToolSchema } from "../types/tools.js";
 
@@ -36,7 +40,7 @@ export class OpenAIResponsesProvider implements ModelProvider {
   }
 
   async chat(params: ChatParams): Promise<ModelResponse> {
-    const inputItems = messagesToInputItems(params.messages);
+    const inputItems = conversationItemsToInputItems(params.conversationItems);
     const tools = params.tools.map(toFunctionTool);
 
     const response = await this.client.responses.create({
@@ -78,17 +82,12 @@ export function messagesToInputItems(
       continue;
     }
 
-    // Separate tool-use and tool-result blocks from text blocks because
-    // they map to different item types in the Responses API.
     const textBlocks = msg.content.filter((b) => b.type === "text");
     const toolUseBlocks = msg.content.filter((b) => b.type === "tool_use");
     const toolResultBlocks = msg.content.filter(
       (b) => b.type === "tool_result"
     );
 
-    // Emit a message item for any text content.
-    // Assistant messages represent previous model outputs and must use
-    // `output_text` content parts; user messages use `input_text`.
     if (textBlocks.length > 0) {
       if (msg.role === "assistant") {
         items.push({
@@ -99,7 +98,7 @@ export function messagesToInputItems(
             text: (b as { type: "text"; text: string }).text,
             annotations: [],
           })),
-        });
+        } as unknown as OpenAI.Responses.ResponseInputItem);
       } else {
         items.push({
           type: "message",
@@ -112,7 +111,6 @@ export function messagesToInputItems(
       }
     }
 
-    // Assistant tool-use blocks become function_call items.
     for (const block of toolUseBlocks) {
       const tu = block as {
         type: "tool_use";
@@ -128,19 +126,67 @@ export function messagesToInputItems(
       });
     }
 
-    // User tool-result blocks become function_call_output items.
     for (const block of toolResultBlocks) {
       const tr = block as {
         type: "tool_result";
         toolUseId: string;
         content: string;
-        isError?: boolean;
       };
       items.push({
         type: "function_call_output",
         call_id: tr.toolUseId,
         output: tr.content,
       });
+    }
+  }
+
+  return items;
+}
+
+export function conversationItemsToInputItems(
+  conversationItems: ConversationItem[]
+): OpenAI.Responses.ResponseInputItem[] {
+  const items: OpenAI.Responses.ResponseInputItem[] = [];
+
+  for (const item of conversationItems) {
+    switch (item.type) {
+      case "message":
+      case "compaction_summary": {
+        const role = item.type === "message" ? item.role : "user";
+        const content = item.type === "message" ? item.content : item.summary;
+        items.push({
+          type: "message",
+          role,
+          content,
+        });
+        break;
+      }
+      case "reasoning":
+        if (!item.id) break;
+        items.push({
+          type: "reasoning",
+          id: item.id,
+          summary: [{ type: "summary_text", text: item.summary }],
+          ...(item.encryptedContent
+            ? { encrypted_content: item.encryptedContent }
+            : {}),
+        });
+        break;
+      case "function_call":
+        items.push({
+          type: "function_call",
+          call_id: item.id,
+          name: item.name,
+          arguments: JSON.stringify(item.input),
+        });
+        break;
+      case "function_output":
+        items.push({
+          type: "function_call_output",
+          call_id: item.callId,
+          output: item.content,
+        });
+        break;
     }
   }
 
@@ -180,6 +226,7 @@ export function responseToModelResponse(
 ): ModelResponse {
   const content: ContentBlock[] = [];
   let reasoning: string | undefined;
+  const reasoningItems: ConversationReasoningItem[] = [];
 
   for (const item of response.output) {
     if (item.type === "message") {
@@ -207,6 +254,12 @@ export function responseToModelResponse(
         .trim();
       if (summaryText) {
         reasoning = summaryText;
+        reasoningItems.push({
+          type: "reasoning",
+          id: ri.id,
+          summary: summaryText,
+          ...(ri.encrypted_content ? { encryptedContent: ri.encrypted_content } : {}),
+        });
       }
     }
     // Skip other output item types (web_search_call, etc.)
@@ -220,7 +273,13 @@ export function responseToModelResponse(
       }
     : undefined;
 
-  return { stopReason, content, reasoning, usage };
+  return {
+    stopReason,
+    content,
+    reasoning,
+    reasoningItems: reasoningItems.length > 0 ? reasoningItems : undefined,
+    usage,
+  };
 }
 
 export function mapStopReason(

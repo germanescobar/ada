@@ -4,6 +4,7 @@ import type {
   PolicyContext,
   PolicyDecision,
 } from "./policies.js";
+import type { ConversationItem } from "../types/conversation.js";
 import type { Message } from "../types/messages.js";
 
 const STATIC_SYSTEM_PROMPT = `You are Ada, a coding agent.
@@ -65,6 +66,22 @@ export class ContextBuilder {
       {
         role: "user",
         content: [{ type: "text", text: dynamicContext }],
+      },
+    ];
+  }
+
+  async buildItemsWithDynamicContext(
+    items: ConversationItem[]
+  ): Promise<ConversationItem[]> {
+    const dynamicContext = await this.buildDynamicContext();
+    if (!dynamicContext) return items;
+
+    return [
+      ...items,
+      {
+        type: "message",
+        role: "user",
+        content: dynamicContext,
       },
     ];
   }

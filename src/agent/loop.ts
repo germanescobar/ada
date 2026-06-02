@@ -4,7 +4,14 @@ import type { ToolRegistry } from "../tools/registry.js";
 import type { EventStore } from "../storage/event-store.js";
 import type { SessionStore } from "../storage/session-store.js";
 import type { SessionState } from "../types/agent.js";
-import type { ContentBlock, Message } from "../types/messages.js";
+import {
+  contentBlocksToConversationItems,
+  conversationItemToText,
+  conversationItemsToMessages,
+  messagesToConversationItems,
+  type ConversationItem,
+} from "../types/conversation.js";
+import type { ContentBlock } from "../types/messages.js";
 import type { StreamEvent } from "../types/stream.js";
 import { ContextBuilder } from "./context-builder.js";
 import { Executor } from "./executor.js";
@@ -37,8 +44,12 @@ export class AgentLoop {
 
   async run(session: SessionState, userMessage: string): Promise<void> {
     try {
-      // Append user message
-      session.messages.push({ role: "user", content: userMessage });
+      this.normalizeSession(session);
+      session.conversationItems.push({
+        type: "message",
+        role: "user",
+        content: userMessage,
+      });
       if (!session.title) {
         session.title = this.generateTitle(userMessage);
       }
@@ -62,12 +73,13 @@ export class AgentLoop {
 
       for (let i = 0; i < MAX_ITERATIONS; i++) {
         await this.compactSessionIfNeeded(session);
-        const messages = await this.contextBuilder.buildMessagesWithDynamicContext(
-          session.messages
+        const conversationItems = await this.contextBuilder.buildItemsWithDynamicContext(
+          session.conversationItems
         );
         const response = await this.provider.chat({
           systemPrompt,
-          messages,
+          conversationItems,
+          messages: conversationItemsToMessages(conversationItems),
           tools,
         });
 
@@ -85,10 +97,11 @@ export class AgentLoop {
         });
         this.updateContextBudget(session, response.usage);
 
-        const assistantMessage: Message = {
-          role: "assistant",
-          content: response.content,
-        };
+        const assistantItems = contentBlocksToConversationItems(
+          response.content,
+          response.reasoning,
+          response.reasoningItems
+        );
 
         if (response.reasoning) {
           this.emit({ type: "assistant.reasoning", text: response.reasoning });
@@ -104,7 +117,7 @@ export class AgentLoop {
         // If no tool use, we're done
         finalStopReason = response.stopReason;
         if (response.stopReason !== "tool_use") {
-          session.messages.push(assistantMessage);
+          session.conversationItems.push(...assistantItems);
           await this.saveSession(session);
           status = "completed";
           break;
@@ -157,8 +170,10 @@ export class AgentLoop {
               );
             }
 
-            session.messages.push(assistantMessage);
-            session.messages.push({ role: "user", content: resultBlocks });
+            session.conversationItems.push(...assistantItems);
+            session.conversationItems.push(
+              ...contentBlocksToConversationItems(resultBlocks)
+            );
             await this.saveSession(session);
             throw err;
           }
@@ -182,8 +197,10 @@ export class AgentLoop {
         }
 
         // Append tool results as user message
-        session.messages.push(assistantMessage);
-        session.messages.push({ role: "user", content: resultBlocks });
+        session.conversationItems.push(...assistantItems);
+        session.conversationItems.push(
+          ...contentBlocksToConversationItems(resultBlocks)
+        );
         await this.saveSession(session);
       }
 
@@ -220,20 +237,22 @@ export class AgentLoop {
   }
 
   private async saveSession(session: SessionState): Promise<void> {
+    this.normalizeSession(session);
     session.lastActiveAt = new Date().toISOString();
     await this.sessionStore.save(session);
   }
 
   private async compactSessionIfNeeded(session: SessionState): Promise<void> {
-    const beforeTokens = this.estimateMessagesTokens(session.messages);
+    this.normalizeSession(session);
+    const beforeTokens = this.estimateConversationTokens(session.conversationItems);
     this.updateContextBudget(session);
 
     if (beforeTokens <= this.contextBudget.thresholdTokens) return;
 
-    const existingSummary = this.extractCompactionSummary(session.messages[0]);
+    const existingSummary = this.extractCompactionSummary(session.conversationItems[0]);
     const compactableMessages = existingSummary
-      ? session.messages.slice(1)
-      : session.messages;
+      ? session.conversationItems.slice(1)
+      : session.conversationItems;
     const preserveCount = Math.max(1, this.contextBudget.preserveRecentMessages);
 
     if (compactableMessages.length <= preserveCount) return;
@@ -244,25 +263,25 @@ export class AgentLoop {
     );
     if (splitIndex <= 0) return;
 
-    const olderMessages = compactableMessages.slice(0, splitIndex);
-    const recentMessages = compactableMessages.slice(splitIndex);
-    const summary = this.buildCompactionSummary(existingSummary, olderMessages);
+    const olderItems = compactableMessages.slice(0, splitIndex);
+    const recentItems = compactableMessages.slice(splitIndex);
+    const summary = this.buildCompactionSummary(existingSummary, olderItems);
 
-    session.messages = [
+    session.conversationItems = [
       {
-        role: "user",
-        content: [{ type: "text", text: summary }],
+        type: "compaction_summary",
+        summary,
       },
-      ...recentMessages,
+      ...recentItems,
     ];
 
-    const afterTokens = this.estimateMessagesTokens(session.messages);
+    const afterTokens = this.estimateConversationTokens(session.conversationItems);
     const compactedAt = new Date().toISOString();
     session.contextBudget = {
       ...session.contextBudget,
       approximateTokens: afterTokens,
       thresholdTokens: this.contextBudget.thresholdTokens,
-      preservedRecentMessages: recentMessages.length,
+      preservedRecentMessages: recentItems.length,
       compactedAt,
     };
 
@@ -270,9 +289,9 @@ export class AgentLoop {
       beforeApproximateTokens: beforeTokens,
       afterApproximateTokens: afterTokens,
       beforeMessages: compactableMessages.length + (existingSummary ? 1 : 0),
-      afterMessages: session.messages.length,
-      summarizedMessages: olderMessages.length,
-      preservedRecentMessages: recentMessages.length,
+      afterMessages: session.conversationItems.length,
+      summarizedMessages: olderItems.length,
+      preservedRecentMessages: recentItems.length,
     });
     await this.saveSession(session);
   }
@@ -283,16 +302,16 @@ export class AgentLoop {
   ): void {
     session.contextBudget = {
       ...session.contextBudget,
-      approximateTokens: this.estimateMessagesTokens(session.messages),
+      approximateTokens: this.estimateConversationTokens(session.conversationItems),
       thresholdTokens: this.contextBudget.thresholdTokens,
       preservedRecentMessages: this.contextBudget.preserveRecentMessages,
       lastProviderUsage: usage ?? session.contextBudget?.lastProviderUsage,
     };
   }
 
-  private estimateMessagesTokens(messages: Message[]): number {
-    const characters = messages.reduce(
-      (total, message) => total + this.messageToText(message).length,
+  private estimateConversationTokens(items: ConversationItem[]): number {
+    const characters = items.reduce(
+      (total, item) => total + conversationItemToText(item).length,
       0
     );
     return Math.ceil(characters / 4);
@@ -300,10 +319,10 @@ export class AgentLoop {
 
   private buildCompactionSummary(
     existingSummary: string | undefined,
-    messages: Message[]
+    items: ConversationItem[]
   ): string {
-    const newSummary = messages
-      .map((message) => `- ${message.role}: ${this.messageToText(message)}`)
+    const newSummary = items
+      .map((item) => `- ${item.type}: ${conversationItemToText(item)}`)
       .join("\n");
     const lines = [
       existingSummary ?? COMPACTION_SUMMARY_HEADER,
@@ -318,14 +337,14 @@ export class AgentLoop {
   }
 
   private findSafeCompactionSplitIndex(
-    messages: Message[],
+    items: ConversationItem[],
     desiredSplitIndex: number
   ): number {
-    let splitIndex = Math.max(0, Math.min(messages.length, desiredSplitIndex));
+    let splitIndex = Math.max(0, Math.min(items.length, desiredSplitIndex));
 
     while (
       splitIndex > 0 &&
-      this.startsWithToolResultMessage(messages[splitIndex])
+      this.startsWithFunctionOutputItem(items[splitIndex])
     ) {
       splitIndex--;
     }
@@ -333,13 +352,8 @@ export class AgentLoop {
     return splitIndex;
   }
 
-  private startsWithToolResultMessage(message: Message | undefined): boolean {
-    return (
-      Boolean(message) &&
-      message?.role === "user" &&
-      Array.isArray(message.content) &&
-      message.content.some((block) => block.type === "tool_result")
-    );
+  private startsWithFunctionOutputItem(item: ConversationItem | undefined): boolean {
+    return item?.type === "function_output";
   }
 
   private truncateCompactionSummary(
@@ -376,30 +390,17 @@ export class AgentLoop {
     return `${prefix}${newSummary.slice(0, contentLimit).trimEnd()}${truncatedSuffix}`;
   }
 
-  private extractCompactionSummary(message: Message | undefined): string | undefined {
-    if (!message || message.role !== "user") return undefined;
-    const text = this.messageToText(message);
+  private extractCompactionSummary(item: ConversationItem | undefined): string | undefined {
+    if (!item) return undefined;
+    const text =
+      item.type === "compaction_summary"
+        ? item.summary
+        : item.type === "message" && item.role === "user"
+          ? item.content
+          : undefined;
+    if (!text) return undefined;
     if (!text.startsWith(COMPACTION_SUMMARY_HEADER)) return undefined;
     return text;
-  }
-
-  private messageToText(message: Message): string {
-    if (typeof message.content === "string") return message.content;
-
-    return message.content
-      .map((block) => {
-        switch (block.type) {
-          case "text":
-            return block.text;
-          case "tool_use":
-            return `tool_use ${block.id} ${block.name} ${JSON.stringify(block.input)}`;
-          case "tool_result":
-            return `tool_result ${block.toolUseId} ${
-              block.isError ? "error" : "ok"
-            } ${block.content} ${JSON.stringify(block.metadata ?? {})}`;
-        }
-      })
-      .join("\n");
   }
 
   private createErrorToolResult(
@@ -412,6 +413,14 @@ export class AgentLoop {
       content,
       isError: true,
     };
+  }
+
+  private normalizeSession(session: SessionState): void {
+    session.conversationItems ??= [];
+    if (session.conversationItems.length === 0 && session.messages.length > 0) {
+      session.conversationItems = messagesToConversationItems(session.messages);
+    }
+    session.messages = conversationItemsToMessages(session.conversationItems);
   }
 
   private emit(event: StreamEvent): void {
