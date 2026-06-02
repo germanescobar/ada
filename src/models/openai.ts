@@ -1,6 +1,6 @@
 import OpenAI from "openai";
-import type { ChatParams, ModelProvider } from "./provider.js";
-import type { ModelResponse } from "../types/agent.js";
+import type { ChatParams, ModelProvider, ModelStreamEvent } from "./provider.js";
+import type { ModelResponse, StopReason } from "../types/agent.js";
 import { conversationItemsToMessages } from "../types/conversation.js";
 import type { Message, ContentBlock } from "../types/messages.js";
 import type { ToolSchema } from "../types/tools.js";
@@ -52,6 +52,92 @@ export class OpenAIProvider implements ModelProvider {
             outputTokens: response.usage.completion_tokens,
           }
         : undefined,
+    };
+  }
+
+  async *streamChat(params: ChatParams): AsyncIterable<ModelStreamEvent> {
+    const messages = this.toOpenAIMessages(
+      params.systemPrompt,
+      conversationItemsToMessages(params.conversationItems)
+    );
+    const tools = params.tools.map((t) => this.toOpenAITool(t));
+
+    const stream = await this.client.chat.completions.create({
+      model: this.model,
+      messages,
+      tools: tools.length > 0 ? tools : undefined,
+      stream: true,
+    });
+
+    let text = "";
+    let reasoning = "";
+    let stopReason: StopReason = "end_turn";
+    const toolCalls = new Map<
+      number,
+      { id?: string; name?: string; arguments: string }
+    >();
+
+    for await (const chunk of stream) {
+      const choice = chunk.choices[0];
+      if (!choice) continue;
+
+      const delta = choice.delta;
+      if (delta.content) {
+        text += delta.content;
+        yield { type: "assistant_text_delta", text: delta.content };
+      }
+
+      const reasoningDelta = this.extractReasoningDelta(delta);
+      if (reasoningDelta) {
+        reasoning += reasoningDelta;
+        yield { type: "assistant_reasoning_delta", text: reasoningDelta };
+      }
+
+      for (const toolCall of delta.tool_calls ?? []) {
+        const existing = toolCalls.get(toolCall.index) ?? { arguments: "" };
+        if (toolCall.id) existing.id = toolCall.id;
+        if (toolCall.function?.name) existing.name = toolCall.function.name;
+        if (toolCall.function?.arguments) {
+          existing.arguments += toolCall.function.arguments;
+        }
+        toolCalls.set(toolCall.index, existing);
+
+        yield {
+          type: "tool_call_delta",
+          index: toolCall.index,
+          id: existing.id,
+          name: existing.name,
+          inputDelta: toolCall.function?.arguments,
+        };
+      }
+
+      if (choice.finish_reason) {
+        stopReason = this.mapFinishReason(choice.finish_reason);
+      }
+    }
+
+    const content: ContentBlock[] = [];
+    if (text) {
+      content.push({ type: "text", text });
+    }
+
+    for (const [, toolCall] of [...toolCalls].sort(([left], [right]) => left - right)) {
+      if (!toolCall.id || !toolCall.name) continue;
+      content.push({
+        type: "tool_use",
+        id: toolCall.id,
+        name: toolCall.name,
+        input: this.parseToolArguments(toolCall.arguments),
+      });
+    }
+
+    yield {
+      type: "response",
+      response: {
+        stopReason,
+        content,
+        reasoning: reasoning || undefined,
+      },
     };
   }
 
@@ -181,5 +267,49 @@ export class OpenAIProvider implements ModelProvider {
     } catch {
       return String(candidate);
     }
+  }
+
+  private extractReasoningDelta(
+    delta: OpenAI.Chat.Completions.ChatCompletionChunk.Choice.Delta
+  ): string | undefined {
+    const reasoningDelta = delta as OpenAI.Chat.Completions.ChatCompletionChunk.Choice.Delta & {
+      reasoning_content?: unknown;
+      reasoning?: unknown;
+    };
+
+    const candidate = reasoningDelta.reasoning_content ?? reasoningDelta.reasoning;
+    if (candidate == null) return undefined;
+    return typeof candidate === "string" ? candidate : String(candidate);
+  }
+
+  private mapFinishReason(
+    finishReason: OpenAI.Chat.Completions.ChatCompletionChunk.Choice["finish_reason"]
+  ): StopReason {
+    switch (finishReason) {
+      case "tool_calls":
+      case "function_call":
+        return "tool_use";
+      case "length":
+        return "max_tokens";
+      case "content_filter":
+        return "error";
+      default:
+        return "end_turn";
+    }
+  }
+
+  private parseToolArguments(inputJson: string): Record<string, unknown> {
+    if (!inputJson) return {};
+
+    try {
+      const parsed = JSON.parse(inputJson);
+      return this.isRecord(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  private isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
   }
 }

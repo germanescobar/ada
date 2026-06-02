@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import type { ChatParams, ModelProvider } from "./provider.js";
+import type { ChatParams, ModelProvider, ModelStreamEvent } from "./provider.js";
 import type { ModelResponse, StopReason } from "../types/agent.js";
 import {
   type ConversationItem,
@@ -51,6 +51,84 @@ export class OpenAIResponsesProvider implements ModelProvider {
     });
 
     return responseToModelResponse(response);
+  }
+
+  async *streamChat(params: ChatParams): AsyncIterable<ModelStreamEvent> {
+    const inputItems = conversationItemsToInputItems(params.conversationItems);
+    const tools = params.tools.map(toFunctionTool);
+
+    const stream = await this.client.responses.create({
+      model: this.model,
+      instructions: params.systemPrompt,
+      input: inputItems,
+      tools: tools.length > 0 ? tools : undefined,
+      stream: true,
+    });
+
+    let response: OpenAI.Responses.Response | undefined;
+    const toolCalls = new Map<
+      number,
+      { id?: string; name?: string; itemId?: string }
+    >();
+
+    for await (const event of stream) {
+      switch (event.type) {
+        case "response.output_text.delta":
+          yield { type: "assistant_text_delta", text: event.delta };
+          break;
+        case "response.reasoning_summary_text.delta":
+          yield { type: "assistant_reasoning_delta", text: event.delta };
+          break;
+        case "response.reasoning_summary.delta":
+          if (typeof event.delta === "string") {
+            yield { type: "assistant_reasoning_delta", text: event.delta };
+          }
+          break;
+        case "response.output_item.added":
+        case "response.output_item.done":
+          if (event.item.type === "function_call") {
+            const existing = toolCalls.get(event.output_index) ?? {};
+            existing.id = event.item.call_id;
+            existing.name = event.item.name;
+            existing.itemId = event.item.id;
+            toolCalls.set(event.output_index, existing);
+            yield {
+              type: "tool_call_delta",
+              index: event.output_index,
+              id: existing.id,
+              name: existing.name,
+            };
+          }
+          break;
+        case "response.function_call_arguments.delta": {
+          const existing = toolCalls.get(event.output_index);
+          yield {
+            type: "tool_call_delta",
+            index: event.output_index,
+            id: existing?.id,
+            name: existing?.name,
+            inputDelta: event.delta,
+          };
+          break;
+        }
+        case "response.completed":
+        case "response.failed":
+        case "response.incomplete":
+          response = event.response;
+          break;
+        case "error":
+          throw new Error(event.message);
+      }
+    }
+
+    if (!response) {
+      throw new Error("OpenAI Responses stream completed without a final response.");
+    }
+
+    yield {
+      type: "response",
+      response: responseToModelResponse(response),
+    };
   }
 }
 
