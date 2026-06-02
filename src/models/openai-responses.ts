@@ -166,7 +166,9 @@ export function conversationItemsToInputItems(
         items.push({
           type: "reasoning",
           id: item.id,
-          summary: [{ type: "summary_text", text: item.summary }],
+          summary: item.summary
+            ? [{ type: "summary_text", text: item.summary }]
+            : [],
           ...(item.encryptedContent
             ? { encrypted_content: item.encryptedContent }
             : {}),
@@ -254,13 +256,13 @@ export function responseToModelResponse(
         .trim();
       if (summaryText) {
         reasoning = summaryText;
-        reasoningItems.push({
-          type: "reasoning",
-          id: ri.id,
-          summary: summaryText,
-          ...(ri.encrypted_content ? { encryptedContent: ri.encrypted_content } : {}),
-        });
       }
+      reasoningItems.push({
+        type: "reasoning",
+        id: ri.id,
+        summary: summaryText,
+        ...(ri.encrypted_content ? { encryptedContent: ri.encrypted_content } : {}),
+      });
     }
     // Skip other output item types (web_search_call, etc.)
   }

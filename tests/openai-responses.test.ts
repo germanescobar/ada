@@ -281,6 +281,24 @@ test("conversationItemsToInputItems preserves reasoning and function-call identi
   ]);
 });
 
+test("conversationItemsToInputItems preserves empty reasoning items", () => {
+  const items = conversationItemsToInputItems([
+    {
+      type: "reasoning",
+      id: "rs_empty",
+      summary: "",
+    },
+  ]);
+
+  assert.deepEqual(items, [
+    {
+      type: "reasoning",
+      id: "rs_empty",
+      summary: [],
+    },
+  ]);
+});
+
 // ─── toFunctionTool ──────────────────────────────────────────────────────
 
 test("toFunctionTool converts a ToolSchema to a Responses API function tool", () => {
@@ -455,7 +473,7 @@ test("responseToModelResponse concatenates multiple reasoning summaries", () => 
   assert.equal(result.reasoning, "Step 1.\nStep 2.");
 });
 
-test("responseToModelResponse ignores empty reasoning summaries", () => {
+test("responseToModelResponse preserves empty reasoning items", () => {
   const response = makeResponse({
     status: "completed",
     output: [
@@ -479,6 +497,13 @@ test("responseToModelResponse ignores empty reasoning summaries", () => {
   const result = responseToModelResponse(response);
 
   assert.equal(result.reasoning, undefined);
+  assert.deepEqual(result.reasoningItems, [
+    {
+      type: "reasoning",
+      id: "rs_1",
+      summary: "",
+    },
+  ]);
 });
 
 test("responseToModelResponse extracts usage information", () => {

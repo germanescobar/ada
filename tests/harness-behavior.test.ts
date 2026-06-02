@@ -258,6 +258,86 @@ test("run compacts older messages when the approximate context budget is exceede
   }
 });
 
+test("run compaction keeps parallel tool-call batches intact", async () => {
+  const cwd = createTempDir();
+  const oldMessages: Message[] = [
+    { role: "user", content: "First request " + "a".repeat(160) },
+    {
+      role: "assistant",
+      content: [{ type: "text", text: "First answer " + "b".repeat(160) }],
+    },
+    { role: "user", content: "Read two files " + "c".repeat(160) },
+    {
+      role: "assistant",
+      content: [
+        {
+          type: "tool_use",
+          id: "tool-1",
+          name: "read_file",
+          input: { path: "one.txt" },
+        },
+        {
+          type: "tool_use",
+          id: "tool-2",
+          name: "read_file",
+          input: { path: "two.txt" },
+        },
+      ],
+    },
+    {
+      role: "user",
+      content: [
+        {
+          type: "tool_result",
+          toolUseId: "tool-1",
+          content: "one result " + "d".repeat(80),
+        },
+        {
+          type: "tool_result",
+          toolUseId: "tool-2",
+          content: "two result " + "e".repeat(80),
+        },
+      ],
+    },
+  ];
+  const session = createSession(cwd, oldMessages);
+  const requests: ChatParams[] = [];
+  const provider: ModelProvider = {
+    async chat(request) {
+      requests.push(request);
+      return {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "Done" }],
+      };
+    },
+  };
+  const { loop, eventStore } = createHarness(cwd, provider, {
+    contextBudget: {
+      thresholdTokens: 80,
+      preserveRecentMessages: 4,
+      summaryMaxCharacters: 2_000,
+    },
+  });
+
+  try {
+    await silenceConsole(() => loop.run(session, "Current request"));
+
+    assert.equal(requests.length, 1);
+    assert.deepEqual(requests[0].messages.slice(1, 4), [
+      oldMessages[3],
+      oldMessages[4],
+      { role: "user", content: "Current request" },
+    ]);
+
+    const events = await eventStore.getEvents(session.id);
+    assert.equal(events[1].type, "conversation_compaction");
+    assert.equal(events[1].data.summarizedMessages, 3);
+    assert.equal(events[1].data.preservedRecentMessages, 5);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test("repeated compaction keeps newly summarized messages when summary is capped", async () => {
   const cwd = createTempDir();
   const session = createSession(cwd, [

@@ -344,7 +344,7 @@ export class AgentLoop {
 
     while (
       splitIndex > 0 &&
-      this.startsWithFunctionOutputItem(items[splitIndex])
+      this.startsInsideFunctionBatch(items, splitIndex)
     ) {
       splitIndex--;
     }
@@ -352,8 +352,23 @@ export class AgentLoop {
     return splitIndex;
   }
 
-  private startsWithFunctionOutputItem(item: ConversationItem | undefined): boolean {
-    return item?.type === "function_output";
+  private startsInsideFunctionBatch(
+    items: ConversationItem[],
+    splitIndex: number
+  ): boolean {
+    const item = items[splitIndex];
+    if (!item || !this.isFunctionBatchItem(item)) return false;
+
+    const previous = items[splitIndex - 1];
+    return Boolean(previous && this.isFunctionBatchItem(previous));
+  }
+
+  private isFunctionBatchItem(item: ConversationItem): boolean {
+    return (
+      item.type === "reasoning" ||
+      item.type === "function_call" ||
+      item.type === "function_output"
+    );
   }
 
   private truncateCompactionSummary(
