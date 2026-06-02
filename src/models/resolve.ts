@@ -1,6 +1,7 @@
 import type { ModelProvider } from "./provider.js";
 import { AnthropicProvider } from "./anthropic.js";
 import { OpenAIProvider } from "./openai.js";
+import { OpenAIResponsesProvider } from "./openai-responses.js";
 
 const OLLAMA_BASE_URL = "http://localhost:11434/v1";
 const OLLAMA_TAGS_URL = "http://localhost:11434/api/tags";
@@ -69,6 +70,11 @@ export interface ResolvedModel {
 export type ProviderConfig =
   | {
       type: "anthropic";
+      provider: string;
+      model: string;
+    }
+  | {
+      type: "openai-responses";
       provider: string;
       model: string;
     }
@@ -180,7 +186,7 @@ export function resolveProviderConfig(modelString: string): ProviderConfig {
 
     case "openai":
       return {
-        type: "openai-compatible",
+        type: "openai-responses",
         provider,
         model,
       };
@@ -229,6 +235,10 @@ export function createProvider(modelString: string): ModelProvider {
 
   if (config.type === "anthropic") {
     return new AnthropicProvider(config.model);
+  }
+
+  if (config.type === "openai-responses") {
+    return new OpenAIResponsesProvider(config.model);
   }
 
   return new OpenAIProvider(config.model, {

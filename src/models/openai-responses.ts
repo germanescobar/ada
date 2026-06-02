@@ -1,0 +1,250 @@
+import OpenAI from "openai";
+import type { ChatParams, ModelProvider } from "./provider.js";
+import type { ModelResponse, StopReason } from "../types/agent.js";
+import type { ContentBlock, Message } from "../types/messages.js";
+import type { ToolSchema } from "../types/tools.js";
+
+/**
+ * Provider that uses the OpenAI Responses API instead of Chat Completions.
+ *
+ * The Responses API uses a conversation-item model where inputs and outputs are
+ * represented as typed items (messages, function calls, function call outputs,
+ * reasoning items).  This provider converts our internal message format into
+ * Responses API input items and converts the response output items back into
+ * our internal ContentBlock format.
+ *
+ * Key differences from Chat Completions:
+ * - The system prompt is passed as `instructions`, not a system message.
+ * - Function calls use `call_id` / `type: "function_call"`.
+ * - Function call outputs use `type: "function_call_output"`.
+ * - Reasoning summaries are explicit output items.
+ * - The overall response has a `status` field instead of `finish_reason`.
+ */
+export class OpenAIResponsesProvider implements ModelProvider {
+  private client: OpenAI;
+  private model: string;
+
+  constructor(
+    model: string,
+    options?: { apiKey?: string; baseURL?: string }
+  ) {
+    this.client = new OpenAI({
+      apiKey: options?.apiKey ?? process.env.OPENAI_API_KEY ?? "not-needed",
+      baseURL: options?.baseURL,
+    });
+    this.model = model;
+  }
+
+  async chat(params: ChatParams): Promise<ModelResponse> {
+    const inputItems = messagesToInputItems(params.messages);
+    const tools = params.tools.map(toFunctionTool);
+
+    const response = await this.client.responses.create({
+      model: this.model,
+      instructions: params.systemPrompt,
+      input: inputItems,
+      tools: tools.length > 0 ? tools : undefined,
+    });
+
+    return responseToModelResponse(response);
+  }
+}
+
+// ─── Input conversion ────────────────────────────────────────────────
+
+/**
+ * Convert internal messages into Responses API input items.
+ *
+ * The Responses API accepts an array of input items.  Our internal
+ * representation uses role-based messages with content blocks, so we map:
+ *
+ * - user text → { type: "message", role: "user", content: [...] }
+ * - assistant text → { type: "message", role: "assistant", content: [...] }
+ * - assistant tool_use → { type: "function_call", ... }
+ * - user tool_result → { type: "function_call_output", ... }
+ */
+export function messagesToInputItems(
+  messages: Message[]
+): OpenAI.Responses.ResponseInputItem[] {
+  const items: OpenAI.Responses.ResponseInputItem[] = [];
+
+  for (const msg of messages) {
+    if (typeof msg.content === "string") {
+      items.push({
+        type: "message",
+        role: msg.role as "user" | "assistant",
+        content: msg.content,
+      });
+      continue;
+    }
+
+    // Separate tool-use and tool-result blocks from text blocks because
+    // they map to different item types in the Responses API.
+    const textBlocks = msg.content.filter((b) => b.type === "text");
+    const toolUseBlocks = msg.content.filter((b) => b.type === "tool_use");
+    const toolResultBlocks = msg.content.filter(
+      (b) => b.type === "tool_result"
+    );
+
+    // Emit a message item for any text content.
+    // Assistant messages represent previous model outputs and must use
+    // `output_text` content parts; user messages use `input_text`.
+    if (textBlocks.length > 0) {
+      if (msg.role === "assistant") {
+        items.push({
+          type: "message",
+          role: "assistant",
+          content: textBlocks.map((b) => ({
+            type: "output_text" as const,
+            text: (b as { type: "text"; text: string }).text,
+            annotations: [],
+          })),
+        });
+      } else {
+        items.push({
+          type: "message",
+          role: "user",
+          content: textBlocks.map((b) => ({
+            type: "input_text" as const,
+            text: (b as { type: "text"; text: string }).text,
+          })),
+        });
+      }
+    }
+
+    // Assistant tool-use blocks become function_call items.
+    for (const block of toolUseBlocks) {
+      const tu = block as {
+        type: "tool_use";
+        id: string;
+        name: string;
+        input: Record<string, unknown>;
+      };
+      items.push({
+        type: "function_call",
+        call_id: tu.id,
+        name: tu.name,
+        arguments: JSON.stringify(tu.input),
+      });
+    }
+
+    // User tool-result blocks become function_call_output items.
+    for (const block of toolResultBlocks) {
+      const tr = block as {
+        type: "tool_result";
+        toolUseId: string;
+        content: string;
+        isError?: boolean;
+      };
+      items.push({
+        type: "function_call_output",
+        call_id: tr.toolUseId,
+        output: tr.content,
+      });
+    }
+  }
+
+  return items;
+}
+
+export function toFunctionTool(
+  tool: ToolSchema
+): OpenAI.Responses.FunctionTool {
+  return {
+    type: "function",
+    name: tool.name,
+    description: tool.description || undefined,
+    parameters: tool.parameters,
+    strict: false,
+  };
+}
+
+// ─── Output conversion ────────────────────────────────────────────────
+
+/**
+ * Convert a Responses API response into our internal ModelResponse.
+ *
+ * Output items we handle:
+ * - message → text content blocks
+ * - function_call → tool_use content blocks
+ * - reasoning → reasoning string (summary text)
+ *
+ * We determine the stop reason from the response status:
+ * - completed + has function_calls → tool_use
+ * - completed → end_turn
+ * - incomplete + reason max_tokens → max_tokens
+ * - everything else → error
+ */
+export function responseToModelResponse(
+  response: OpenAI.Responses.Response
+): ModelResponse {
+  const content: ContentBlock[] = [];
+  let reasoning: string | undefined;
+
+  for (const item of response.output) {
+    if (item.type === "message") {
+      const message = item as OpenAI.Responses.ResponseOutputMessage;
+      for (const part of message.content) {
+        if (part.type === "output_text") {
+          const textPart = part as OpenAI.Responses.ResponseOutputText;
+          content.push({ type: "text", text: textPart.text });
+        }
+        // Skip refusals — we treat them as no content.
+      }
+    } else if (item.type === "function_call") {
+      const fc = item as OpenAI.Responses.ResponseFunctionToolCall;
+      content.push({
+        type: "tool_use",
+        id: fc.call_id,
+        name: fc.name,
+        input: JSON.parse(fc.arguments) as Record<string, unknown>,
+      });
+    } else if (item.type === "reasoning") {
+      const ri = item as OpenAI.Responses.ResponseReasoningItem;
+      const summaryText = ri.summary
+        .map((s) => s.text)
+        .join("\n")
+        .trim();
+      if (summaryText) {
+        reasoning = summaryText;
+      }
+    }
+    // Skip other output item types (web_search_call, etc.)
+  }
+
+  const stopReason = mapStopReason(response, content);
+  const usage = response.usage
+    ? {
+        inputTokens: response.usage.input_tokens,
+        outputTokens: response.usage.output_tokens,
+      }
+    : undefined;
+
+  return { stopReason, content, reasoning, usage };
+}
+
+export function mapStopReason(
+  response: OpenAI.Responses.Response,
+  content: ContentBlock[]
+): StopReason {
+  // If we have tool_use blocks the model wants to call tools.
+  if (content.some((b) => b.type === "tool_use")) {
+    return "tool_use";
+  }
+
+  switch (response.status) {
+    case "completed":
+      return "end_turn";
+    case "incomplete": {
+      const reason = response.incomplete_details?.reason;
+      if (reason === "max_output_tokens") {
+        return "max_tokens";
+      }
+      return "error";
+    }
+    case "failed":
+      return "error";
+    default:
+      return "error";
+  }
+}

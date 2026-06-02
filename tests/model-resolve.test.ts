@@ -98,6 +98,15 @@ test("ollama-cloud requires its own API key", () => {
   );
 });
 
+test("openai resolves to the Responses API provider", () => {
+  const config = resolveProviderConfig("openai/gpt-4");
+  assert.equal(config.type, "openai-responses");
+  if (config.type === "openai-responses") {
+    assert.equal(config.provider, "openai");
+    assert.equal(config.model, "gpt-4");
+  }
+});
+
 test("existing OpenAI-compatible providers keep their defaults", () => {
   assert.deepEqual(resolveProviderConfig("ollama/glm-4.7-flash:latest"), {
     type: "openai-compatible",
