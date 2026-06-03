@@ -8,6 +8,7 @@ const OLLAMA_TAGS_URL = "http://localhost:11434/api/tags";
 const OLLAMA_CLOUD_BASE_URL = "https://ollama.com/v1";
 const GROQ_BASE_URL = "https://api.groq.com/openai/v1";
 const OLLAMA_DISCOVERY_TIMEOUT_MS = 1_000;
+const OLLAMA_CLOUD_MAX_TOKENS = 8_192;
 
 export const OLLAMA_CLOUD_MODELS = [
   "glm-5.1",
@@ -86,6 +87,7 @@ export type ProviderConfig =
       model: string;
       apiKey?: string;
       baseURL?: string;
+      maxTokens?: number;
     };
 
 export function parseModelString(modelString: string): ResolvedModel {
@@ -223,6 +225,7 @@ export function resolveProviderConfig(modelString: string): ProviderConfig {
         model,
         apiKey: process.env.OLLAMA_API_KEY,
         baseURL: OLLAMA_CLOUD_BASE_URL,
+        maxTokens: OLLAMA_CLOUD_MAX_TOKENS,
       };
 
     default:
@@ -246,5 +249,6 @@ export function createProvider(modelString: string): ModelProvider {
   return new OpenAIProvider(config.model, {
     apiKey: config.apiKey,
     baseURL: config.baseURL,
+    maxTokens: config.maxTokens,
   });
 }

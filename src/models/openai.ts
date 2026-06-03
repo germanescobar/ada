@@ -8,16 +8,18 @@ import type { ToolSchema } from "../types/tools.js";
 export class OpenAIProvider implements ModelProvider {
   private client: OpenAI;
   private model: string;
+  private maxTokens?: number;
 
   constructor(
     model: string,
-    options?: { apiKey?: string; baseURL?: string }
+    options?: { apiKey?: string; baseURL?: string; maxTokens?: number }
   ) {
     this.client = new OpenAI({
       apiKey: options?.apiKey ?? process.env.OPENAI_API_KEY ?? "not-needed",
       baseURL: options?.baseURL,
     });
     this.model = model;
+    this.maxTokens = options?.maxTokens;
   }
 
   async chat(params: ChatParams): Promise<ModelResponse> {
@@ -31,6 +33,7 @@ export class OpenAIProvider implements ModelProvider {
       model: this.model,
       messages,
       tools: tools.length > 0 ? tools : undefined,
+      max_tokens: this.maxTokens,
     });
 
     const choice = response.choices[0];
@@ -66,6 +69,7 @@ export class OpenAIProvider implements ModelProvider {
       model: this.model,
       messages,
       tools: tools.length > 0 ? tools : undefined,
+      max_tokens: this.maxTokens,
       stream: true,
       stream_options: { include_usage: true },
     };

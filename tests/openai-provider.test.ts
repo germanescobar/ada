@@ -7,12 +7,15 @@ import type { ChatParams } from "../src/models/provider.js";
 
 type StreamingParams =
   OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming;
+type NonStreamingParams =
+  OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming;
 type ChatCompletionChunk = OpenAI.Chat.Completions.ChatCompletionChunk;
 
 interface FakeOpenAIClient {
   chat: {
     completions: {
       create(params: StreamingParams): Promise<AsyncIterable<ChatCompletionChunk>>;
+      create(params: NonStreamingParams): Promise<OpenAI.Chat.Completions.ChatCompletion>;
     };
   };
 }
@@ -70,6 +73,27 @@ function createUsageChunk(): ChatCompletionChunk {
   };
 }
 
+function createCompletion(): OpenAI.Chat.Completions.ChatCompletion {
+  return {
+    id: "completion-1",
+    created: 1,
+    model: "test-model",
+    object: "chat.completion",
+    choices: [
+      {
+        index: 0,
+        finish_reason: "stop",
+        logprobs: null,
+        message: {
+          role: "assistant",
+          content: "Done",
+          refusal: null,
+        },
+      },
+    ],
+  };
+}
+
 function setClient(provider: OpenAIProvider, client: FakeOpenAIClient): void {
   (
     provider as unknown as {
@@ -78,15 +102,35 @@ function setClient(provider: OpenAIProvider, client: FakeOpenAIClient): void {
   ).client = client;
 }
 
+test("OpenAIProvider.chat sends configured max_tokens", async () => {
+  const provider = new OpenAIProvider("test-model", { maxTokens: 8192 });
+  const calls: NonStreamingParams[] = [];
+
+  setClient(provider, {
+    chat: {
+      completions: {
+        async create(params: StreamingParams | NonStreamingParams) {
+          calls.push(params as NonStreamingParams);
+          return createCompletion();
+        },
+      },
+    },
+  });
+
+  await provider.chat(createParams());
+
+  assert.equal(calls[0]?.max_tokens, 8192);
+});
+
 test("OpenAIProvider.streamChat requests and preserves stream usage", async () => {
-  const provider = new OpenAIProvider("test-model");
+  const provider = new OpenAIProvider("test-model", { maxTokens: 8192 });
   const calls: StreamingParams[] = [];
 
   setClient(provider, {
     chat: {
       completions: {
-        async create(params) {
-          calls.push(params);
+        async create(params: StreamingParams | NonStreamingParams) {
+          calls.push(params as StreamingParams);
           return streamChunks([createTextChunk("Hello"), createUsageChunk()]);
         },
       },
@@ -101,6 +145,7 @@ test("OpenAIProvider.streamChat requests and preserves stream usage", async () =
   assert.deepEqual(calls.map((call) => call.stream_options), [
     { include_usage: true },
   ]);
+  assert.deepEqual(calls.map((call) => call.max_tokens), [8192]);
   assert.deepEqual(events.at(-1), {
     type: "response",
     response: {
@@ -113,15 +158,15 @@ test("OpenAIProvider.streamChat requests and preserves stream usage", async () =
 });
 
 test("OpenAIProvider.streamChat retries without stream_options when unsupported", async () => {
-  const provider = new OpenAIProvider("test-model");
+  const provider = new OpenAIProvider("test-model", { maxTokens: 8192 });
   const calls: StreamingParams[] = [];
 
   setClient(provider, {
     chat: {
       completions: {
-        async create(params) {
-          calls.push(params);
-          if (params.stream_options) {
+        async create(params: StreamingParams | NonStreamingParams) {
+          calls.push(params as StreamingParams);
+          if ((params as StreamingParams).stream_options) {
             throw new Error("Unsupported parameter: stream_options");
           }
           return streamChunks([createTextChunk("Hello")]);
@@ -138,6 +183,7 @@ test("OpenAIProvider.streamChat retries without stream_options when unsupported"
   assert.equal(calls.length, 2);
   assert.deepEqual(calls[0]?.stream_options, { include_usage: true });
   assert.equal(calls[1]?.stream_options, undefined);
+  assert.deepEqual(calls.map((call) => call.max_tokens), [8192, 8192]);
   assert.deepEqual(events.at(-1), {
     type: "response",
     response: {
