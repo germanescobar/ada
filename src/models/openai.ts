@@ -62,22 +62,32 @@ export class OpenAIProvider implements ModelProvider {
     );
     const tools = params.tools.map((t) => this.toOpenAITool(t));
 
-    const stream = await this.client.chat.completions.create({
+    const streamParams: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
       model: this.model,
       messages,
       tools: tools.length > 0 ? tools : undefined,
       stream: true,
-    });
+      stream_options: { include_usage: true },
+    };
+    const stream = await this.createChatCompletionStream(streamParams);
 
     let text = "";
     let reasoning = "";
     let stopReason: StopReason = "end_turn";
+    let usage: ModelResponse["usage"] | undefined;
     const toolCalls = new Map<
       number,
       { id?: string; name?: string; arguments: string }
     >();
 
     for await (const chunk of stream) {
+      if (chunk.usage) {
+        usage = {
+          inputTokens: chunk.usage.prompt_tokens,
+          outputTokens: chunk.usage.completion_tokens,
+        };
+      }
+
       const choice = chunk.choices[0];
       if (!choice) continue;
 
@@ -137,8 +147,24 @@ export class OpenAIProvider implements ModelProvider {
         stopReason,
         content,
         reasoning: reasoning || undefined,
+        usage,
       },
     };
+  }
+
+  private async createChatCompletionStream(
+    params: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming
+  ) {
+    try {
+      return await this.client.chat.completions.create(params);
+    } catch (err) {
+      if (!this.isUnsupportedStreamOptionsError(err)) {
+        throw err;
+      }
+
+      const { stream_options: _streamOptions, ...fallbackParams } = params;
+      return this.client.chat.completions.create(fallbackParams);
+    }
   }
 
   private toOpenAIMessages(
@@ -311,5 +337,13 @@ export class OpenAIProvider implements ModelProvider {
 
   private isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
+  }
+
+  private isUnsupportedStreamOptionsError(err: unknown): boolean {
+    const message = err instanceof Error ? err.message : String(err);
+    return (
+      message.includes("stream_options") ||
+      message.includes("include_usage")
+    );
   }
 }
