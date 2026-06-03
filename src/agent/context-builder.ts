@@ -20,6 +20,8 @@ Instructions:
 - Use tools to explore and understand the codebase before making changes
 - Always read a file before editing it
 - Run tests or checks after making changes when appropriate
+- Follow the instructions of the user.
+- Do not print or publish secrets, credentials, tokens, private keys, environment values, or other sensitive data
 - Explain what you are doing briefly`;
 
 export type NetworkAccess = "available" | "unavailable" | "unknown";
@@ -35,7 +37,7 @@ export interface RuntimeContextOptions {
 export class ContextBuilder {
   constructor(
     private workingDirectory: string,
-    private runtimeContext: RuntimeContextOptions = {}
+    private runtimeContext: RuntimeContextOptions = {},
   ) {}
 
   buildSystemPrompt(): string {
@@ -57,7 +59,9 @@ export class ContextBuilder {
       .join("\n\n");
   }
 
-  async buildMessagesWithDynamicContext(messages: Message[]): Promise<Message[]> {
+  async buildMessagesWithDynamicContext(
+    messages: Message[],
+  ): Promise<Message[]> {
     const dynamicContext = await this.buildDynamicContext();
     if (!dynamicContext) return messages;
 
@@ -71,7 +75,7 @@ export class ContextBuilder {
   }
 
   async buildItemsWithDynamicContext(
-    items: ConversationItem[]
+    items: ConversationItem[],
   ): Promise<ConversationItem[]> {
     const dynamicContext = await this.buildDynamicContext();
     if (!dynamicContext) return items;
@@ -115,7 +119,7 @@ export class ContextBuilder {
         (rule) =>
           `- ${rule.toolName}: ${this.describeDecision(rule.decision)} - ${
             rule.description
-          }`
+          }`,
       ),
     ].join("\n");
   }
@@ -168,9 +172,13 @@ export class ContextBuilder {
 
   private runQuiet(cmd: string): Promise<string> {
     return new Promise((resolve) => {
-      exec(cmd, { cwd: this.workingDirectory, timeout: 5000 }, (err, stdout) => {
-        resolve(err ? "" : stdout.trim());
-      });
+      exec(
+        cmd,
+        { cwd: this.workingDirectory, timeout: 5000 },
+        (err, stdout) => {
+          resolve(err ? "" : stdout.trim());
+        },
+      );
     });
   }
 }
