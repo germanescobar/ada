@@ -74,6 +74,7 @@ test("ollama-cloud resolves to the OpenAI-compatible cloud endpoint", () => {
         model: "glm-5.1",
         apiKey: "test-ollama-key",
         baseURL: "https://ollama.com/v1",
+        maxTokens: 8192,
       });
     }
   );

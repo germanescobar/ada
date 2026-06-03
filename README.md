@@ -140,6 +140,8 @@ Supported Ollama Cloud models:
 - `ollama-cloud/kimi-k2.6`
 - `ollama-cloud/kimi-k2-thinking`
 
+Ollama Cloud requests use an explicit `max_tokens` value of 8192 so the provider leaves context room for the prompt.
+
 ### JSON Event Streaming
 
 Use `--stream-json` to emit one JSON event per line for machine-readable integrations:
