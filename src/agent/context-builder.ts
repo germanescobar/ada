@@ -6,6 +6,8 @@ import type {
 } from "./policies.js";
 import type { ConversationItem } from "../types/conversation.js";
 import type { Message } from "../types/messages.js";
+import type { Skill } from "../skills/skills.js";
+import { formatSkillsForPrompt } from "../skills/skills.js";
 
 const STATIC_SYSTEM_PROMPT = `You are Ada, a coding agent.
 
@@ -32,6 +34,7 @@ export interface RuntimeContextOptions {
   networkAccess?: NetworkAccess;
   writeScope?: string;
   policyContext?: PolicyContext;
+  skills?: Skill[];
 }
 
 export class ContextBuilder {
@@ -41,7 +44,8 @@ export class ContextBuilder {
   ) {}
 
   buildSystemPrompt(): string {
-    return STATIC_SYSTEM_PROMPT;
+    const skillsSection = formatSkillsForPrompt(this.runtimeContext.skills ?? []);
+    return STATIC_SYSTEM_PROMPT + skillsSection;
   }
 
   async buildDynamicContext(): Promise<string> {
