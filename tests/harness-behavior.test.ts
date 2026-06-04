@@ -127,7 +127,11 @@ test("run preserves prior messages and passes deterministic tool schemas", async
       requests[0].tools.map((tool) => tool.name),
       ["alpha", "zeta"]
     );
-    assert.deepEqual(requests[0].messages.slice(0, 3), [
+    assert.match(
+      JSON.stringify(requests[0].messages[0]?.content),
+      /Runtime context for the assistant/
+    );
+    assert.deepEqual(requests[0].messages.slice(1, 4), [
       { role: "user", content: "Earlier request" },
       {
         role: "assistant",
@@ -135,10 +139,6 @@ test("run preserves prior messages and passes deterministic tool schemas", async
       },
       { role: "user", content: "Next request" },
     ]);
-    assert.match(
-      JSON.stringify(requests[0].messages.at(-1)),
-      /Current environment context/
-    );
 
     const saved = await sessionStore.load(session.id);
     assert.ok(saved);
@@ -215,12 +215,16 @@ test("run compacts older messages when the approximate context budget is exceede
     await silenceConsole(() => loop.run(session, "Current request"));
 
     assert.equal(requests.length, 1);
-    assert.equal(requests[0].messages[0].role, "user");
     assert.match(
       JSON.stringify(requests[0].messages[0].content),
+      /Runtime context for the assistant/
+    );
+    assert.equal(requests[0].messages[1].role, "user");
+    assert.match(
+      JSON.stringify(requests[0].messages[1].content),
       /Previous conversation summary/
     );
-    assert.deepEqual(requests[0].messages.slice(1, 4), [
+    assert.deepEqual(requests[0].messages.slice(2, 5), [
       preservedToolUse,
       preservedToolResult,
       { role: "user", content: "Current request" },
@@ -323,7 +327,11 @@ test("run compaction keeps parallel tool-call batches intact", async () => {
     await silenceConsole(() => loop.run(session, "Current request"));
 
     assert.equal(requests.length, 1);
-    assert.deepEqual(requests[0].messages.slice(1, 4), [
+    assert.match(
+      JSON.stringify(requests[0].messages[0]?.content),
+      /Runtime context for the assistant/
+    );
+    assert.deepEqual(requests[0].messages.slice(2, 5), [
       oldMessages[3],
       oldMessages[4],
       { role: "user", content: "Current request" },

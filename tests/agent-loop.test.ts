@@ -12,6 +12,7 @@ import { EventStore } from "../src/storage/event-store.js";
 import { SessionStore } from "../src/storage/session-store.js";
 import { ToolRegistry } from "../src/tools/registry.js";
 import type { ModelResponse, SessionState } from "../src/types/agent.js";
+import type { Message } from "../src/types/messages.js";
 import type { ToolCall, ToolResult } from "../src/types/tools.js";
 
 function createTempDir(): string {
@@ -220,6 +221,63 @@ test("run saves assistant responses and tool-result batches before later failure
       events.map((event) => event.type),
       ["user_message", "assistant_response", "error"]
     );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("runtime context is not sent as the latest user turn after tool results", async () => {
+  const cwd = createTempDir();
+  const session = createSession(cwd);
+  const modelMessages: Message[][] = [];
+  let calls = 0;
+  const provider: ModelProvider = {
+    async chat(params) {
+      modelMessages.push(params.messages);
+      calls += 1;
+      if (calls === 1) {
+        return {
+          stopReason: "tool_use",
+          content: [
+            {
+              type: "tool_use",
+              id: "tool-1",
+              name: "read_file",
+              input: { path: "README.md" },
+            },
+          ],
+        };
+      }
+      return {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "Done." }],
+      };
+    },
+  };
+  const { loop } = createLoop(
+    cwd,
+    provider,
+    async () => ({ content: "file contents" })
+  );
+
+  try {
+    await silenceConsole(() => loop.run(session, "Read the README"));
+
+    assert.equal(modelMessages.length, 2);
+    assert.match(
+      JSON.stringify(modelMessages[0]?.[0]?.content),
+      /Runtime context for the assistant/
+    );
+    assert.deepEqual(modelMessages[0]?.at(-1), {
+      role: "user",
+      content: "Read the README",
+    });
+
+    const secondLast = modelMessages[1]?.at(-1);
+    assert.equal(secondLast?.role, "user");
+    assert.ok(Array.isArray(secondLast?.content));
+    assert.equal(secondLast.content[0]?.type, "tool_result");
+    assert.equal(secondLast.content[0]?.content, "file contents");
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }

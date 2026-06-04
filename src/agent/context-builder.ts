@@ -54,7 +54,7 @@ export class ContextBuilder {
     const policyContext = this.buildPolicyContext();
 
     return [
-      "Current environment context:",
+      "Runtime context for the assistant. This is not a user request:",
       environmentContext,
       policyContext,
       gitContext,
@@ -70,11 +70,11 @@ export class ContextBuilder {
     if (!dynamicContext) return messages;
 
     return [
-      ...messages,
       {
         role: "user",
         content: [{ type: "text", text: dynamicContext }],
       },
+      ...messages,
     ];
   }
 
@@ -85,12 +85,12 @@ export class ContextBuilder {
     if (!dynamicContext) return items;
 
     return [
-      ...items,
       {
         type: "message",
         role: "user",
         content: dynamicContext,
       },
+      ...items,
     ];
   }
 
