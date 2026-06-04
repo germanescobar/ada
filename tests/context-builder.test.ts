@@ -38,7 +38,10 @@ test("buildDynamicContext includes cwd and current git context", async () => {
 
     const context = await new ContextBuilder(cwd).buildDynamicContext();
 
-    assert.match(context, /Current environment context:/);
+    assert.match(
+      context,
+      /Runtime context for the assistant\. This is not a user request:/
+    );
     assert.match(context, /Runtime:/);
     assert.match(context, new RegExp(`Working directory: ${cwd}`));
     assert.match(context, /Shell: /);
@@ -101,9 +104,12 @@ test("buildMessagesWithDynamicContext does not mutate saved messages", async () 
     assert.equal(messages.length, 1);
     assert.equal(result.length, 2);
     assert.notEqual(result, messages);
-    assert.deepEqual(result[0], messages[0]);
-    assert.equal(result[1]?.role, "user");
-    assert.match(JSON.stringify(result[1]?.content), /Current environment context/);
+    assert.equal(result[0]?.role, "user");
+    assert.match(
+      JSON.stringify(result[0]?.content),
+      /Runtime context for the assistant/
+    );
+    assert.deepEqual(result[1], messages[0]);
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
