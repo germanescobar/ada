@@ -1,4 +1,5 @@
 import readline from "node:readline";
+import fs from "node:fs/promises";
 import path from "node:path";
 import chalk from "chalk";
 import { Command, InvalidArgumentError } from "commander";
@@ -13,6 +14,10 @@ import { runCommandTool } from "../tools/run-command.js";
 import { deleteFileTool } from "../tools/delete-file.js";
 import { PolicyEngine } from "../agent/policies.js";
 import { ContextBuilder } from "../agent/context-builder.js";
+import {
+  getGlobalAgentsPath,
+  getRepositoryAgentsPath,
+} from "../agent/agents.js";
 import { Executor } from "../agent/executor.js";
 import {
   AgentLoop,
@@ -30,6 +35,10 @@ import {
 import { loadSkills, type Skill } from "../skills/skills.js";
 
 const DEFAULT_MODEL = "anthropic/claude-sonnet-4-6";
+const AGENTS_TEMPLATE = `# AGENTS.md
+
+Describe the coding guidelines, project conventions, and operational constraints Ada should follow.
+`;
 
 function getStoragePaths(cwd: string) {
   const base = path.join(cwd, ".coding-agent");
@@ -81,6 +90,27 @@ function buildContextBudgetOptions(options: {
   };
 }
 
+async function createAgentsFile(filePath: string, force: boolean): Promise<void> {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  try {
+    await fs.writeFile(filePath, AGENTS_TEMPLATE, {
+      encoding: "utf-8",
+      flag: force ? "w" : "wx",
+    });
+  } catch (err) {
+    if (isAlreadyExistsError(err)) {
+      throw new Error(
+        `AGENTS.md already exists at ${filePath}. Use --force to overwrite it.`,
+      );
+    }
+    throw err;
+  }
+}
+
+function isAlreadyExistsError(err: unknown): boolean {
+  return err instanceof Error && "code" in err && err.code === "EEXIST";
+}
+
 async function askApproval(
   toolName: string,
   input: Record<string, unknown>
@@ -123,6 +153,30 @@ export function createCLI() {
             "Note: Local Ollama discovery unavailable; showing built-in local models."
           )
         );
+      }
+    });
+
+  program
+    .command("agents")
+    .description("Manage AGENTS.md instruction files")
+    .command("init")
+    .description("Create an AGENTS.md instruction file")
+    .option(
+      "--global",
+      "Create ~/.ada/AGENTS.md instead of repository AGENTS.md",
+    )
+    .option("--force", "Overwrite an existing AGENTS.md")
+    .action(async (options: { global?: boolean; force?: boolean }) => {
+      const filePath = options.global
+        ? getGlobalAgentsPath()
+        : getRepositoryAgentsPath(process.cwd());
+
+      try {
+        await createAgentsFile(filePath, options.force ?? false);
+        console.log(chalk.green(`Created ${filePath}`));
+      } catch (err) {
+        console.error(chalk.red((err as Error).message));
+        process.exit(1);
       }
     });
 

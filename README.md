@@ -112,6 +112,31 @@ Use a different AI model:
 ada chat "Your message here" --model ollama/glm-4.7-flash:latest
 ```
 
+### AGENTS.md Instructions
+
+Ada automatically includes AGENTS.md guidance in the system prompt when it builds context for a chat session.
+
+Discovery order:
+
+1. Global defaults from `~/.ada/AGENTS.md`
+2. Repository instructions from `<repo-root>/AGENTS.md`
+
+When both files exist, repository instructions are placed after global instructions and override them when they conflict.
+
+Create a global instructions file:
+
+```bash
+ada agents init --global
+```
+
+Create a repository instructions file at the Git repository root, or in the current directory when outside Git:
+
+```bash
+ada agents init
+```
+
+Use `--force` with either command to overwrite an existing file.
+
 ### Context Compaction
 
 Ada tracks an approximate context budget for each session. When a transcript exceeds the threshold, older messages are replaced with a summary while recent messages, including recent tool calls and tool results, remain available verbatim.
