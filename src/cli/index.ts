@@ -27,6 +27,7 @@ import {
   MODEL_OPTIONS,
   type ModelOption,
 } from "../models/resolve.js";
+import { loadSkills, type Skill } from "../skills/skills.js";
 
 const DEFAULT_MODEL = "anthropic/claude-sonnet-4-6";
 
@@ -142,6 +143,8 @@ export function createCLI() {
       "Recent message count to keep verbatim during compaction",
       parsePositiveInteger
     )
+    .option("--skill <path>", "Load a skill from a file or directory (repeatable)", (val, prev: string[]) => prev.concat(val), [] as string[])
+    .option("--no-skills", "Disable automatic skill discovery (explicit --skill paths still load)")
     .action(async (
       message: string,
       options: {
@@ -151,6 +154,8 @@ export function createCLI() {
         streamJson?: boolean;
         contextThresholdTokens?: number;
         contextPreserveMessages?: number;
+        skill?: string[];
+        skills?: boolean;
       }
     ) => {
       const parentOpts = program.opts() as {
@@ -187,6 +192,33 @@ export function createCLI() {
       registry.register(deleteFileTool);
 
       const policyEngine = PolicyEngine.withDefaults();
+
+      // Load skills
+      const skillPaths = options.skill ?? [];
+      const includeDefaults = options.skills !== false;
+      const { skills, diagnostics } = loadSkills({ cwd, skillPaths, includeDefaults });
+
+      // Log diagnostics for skill loading issues
+      for (const diag of diagnostics) {
+        if (diag.type === "error" || diag.type === "collision") {
+          console.error(chalk.yellow(`Skill warning: ${diag.message} (${diag.path})`));
+        }
+      }
+
+      // Log skills_loaded event
+      if (skills.length > 0) {
+        await eventStore.append(session.id, "skills_loaded", {
+          skills: skills.map((s: Skill) => ({
+            name: s.name,
+            description: s.description,
+            filePath: s.filePath,
+          })),
+        });
+        if (!streamJson) {
+          console.log(chalk.gray(`Skills: ${skills.map((s: Skill) => s.name).join(", ")}`));
+        }
+      }
+
       const contextBuilder = new ContextBuilder(cwd, {
         approvalMode: autoApprove ? "auto" : "prompt",
         networkAccess: "unknown",
@@ -194,6 +226,7 @@ export function createCLI() {
         writeScope:
           "Prefer the working directory and its descendants unless the user explicitly asks for another path.",
         policyContext: policyEngine.describe(),
+        skills,
       });
       const approvalFn = autoApprove ? async () => true : askApproval;
       const executor = new Executor(registry, policyEngine, eventStore, approvalFn);

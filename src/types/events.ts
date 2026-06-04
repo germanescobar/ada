@@ -9,7 +9,8 @@ export type EventType =
   | "policy_decision"
   | "error"
   | "session_end"
-  | "session_archived";
+  | "session_archived"
+  | "skills_loaded";
 
 export interface AgentEvent {
   id: string;
