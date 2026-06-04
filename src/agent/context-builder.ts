@@ -22,7 +22,7 @@ Instructions:
 - Use tools to explore and understand the codebase before making changes
 - Always read a file before editing it
 - Run tests or checks after making changes when appropriate
-- Follow the instructions of the user.
+- Follow the instructions of the user without jumping ahead.
 - Do not print or publish secrets, credentials, tokens, private keys, environment values, or other sensitive data
 - Explain what you are doing briefly`;
 
