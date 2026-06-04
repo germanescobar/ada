@@ -155,7 +155,7 @@ export function createCLI() {
         contextThresholdTokens?: number;
         contextPreserveMessages?: number;
         skill?: string[];
-        noSkills?: boolean;
+        skills?: boolean;
       }
     ) => {
       const parentOpts = program.opts() as {
@@ -195,7 +195,7 @@ export function createCLI() {
 
       // Load skills
       const skillPaths = options.skill ?? [];
-      const includeDefaults = !options.noSkills;
+      const includeDefaults = options.skills !== false;
       const { skills, diagnostics } = loadSkills({ cwd, skillPaths, includeDefaults });
 
       // Log diagnostics for skill loading issues
