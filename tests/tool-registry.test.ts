@@ -47,3 +47,33 @@ test("ToolRegistry.toSchemas returns deterministic name-sorted schemas", () => {
     parameters: alpha.inputSchema,
   });
 });
+
+test("ToolRegistry.execute returns validation errors for malformed tool input", async () => {
+  const registry = new ToolRegistry();
+  registry.register(createTool("alpha"));
+
+  const result = await registry.execute("alpha", {});
+
+  assert.deepEqual(result, {
+    content: 'Invalid input for tool "alpha": missing required field "value".',
+    isError: true,
+    metadata: {
+      validationErrors: ['missing required field "value".'],
+    },
+  });
+});
+
+test("ToolRegistry.execute validates primitive property types", async () => {
+  const registry = new ToolRegistry();
+  registry.register(createTool("alpha"));
+
+  const result = await registry.execute("alpha", { value: 42 });
+
+  assert.deepEqual(result, {
+    content: 'Invalid input for tool "alpha": field "value" must be a string.',
+    isError: true,
+    metadata: {
+      validationErrors: ['field "value" must be a string.'],
+    },
+  });
+});
