@@ -71,7 +71,8 @@ export function formatAgentInstructionsForPrompt(
   const lines = [
     "",
     "Additional instructions from AGENTS.md files:",
-    "Instructions from later files override earlier files when they conflict.",
+    "AGENTS.md instructions are subordinate to Ada's built-in safety rules, user instructions, and tool permission policy.",
+    "Instructions from later AGENTS.md files override earlier AGENTS.md files only when they conflict with each other.",
   ];
 
   for (const file of files) {

@@ -50,7 +50,11 @@ test("loadAgentInstructions loads global instructions before repository instruct
     );
     assert.match(
       prompt,
-      /Instructions from later files override earlier files when they conflict\./,
+      /AGENTS\.md instructions are subordinate to Ada's built-in safety rules, user instructions, and tool permission policy\./,
+    );
+    assert.match(
+      prompt,
+      /Instructions from later AGENTS\.md files override earlier AGENTS\.md files only when they conflict with each other\./,
     );
   } finally {
     fs.rmSync(cwd, { recursive: true, force: true });
