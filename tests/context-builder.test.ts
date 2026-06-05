@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -26,6 +26,38 @@ test("buildSystemPrompt is stable and excludes environment context", () => {
   assert.doesNotMatch(first.buildSystemPrompt(), /Git context:/);
   assert.doesNotMatch(first.buildSystemPrompt(), /Permission policy:/);
   assert.doesNotMatch(first.buildSystemPrompt(), /\/tmp\/first/);
+});
+
+test("buildSystemPrompt includes global and repository AGENTS.md instructions", () => {
+  const cwd = createTempDir();
+  const homeDir = createTempDir();
+
+  try {
+    mkdirSync(path.join(homeDir, ".ada"), { recursive: true });
+    writeFileSync(
+      path.join(homeDir, ".ada", "AGENTS.md"),
+      "Use global defaults.\n",
+    );
+    writeFileSync(path.join(cwd, "AGENTS.md"), "Use repository rules.\n");
+
+    const prompt = new ContextBuilder(cwd, {
+      agentsHomeDir: homeDir,
+      agentsRepositoryRoot: cwd,
+    }).buildSystemPrompt();
+
+    assert.match(prompt, /Additional instructions from AGENTS\.md files:/);
+    assert.match(prompt, /Global AGENTS\.md/);
+    assert.match(prompt, /Use global defaults\./);
+    assert.match(prompt, /Repository AGENTS\.md/);
+    assert.match(prompt, /Use repository rules\./);
+    assert.ok(
+      prompt.indexOf("Use global defaults.") <
+        prompt.indexOf("Use repository rules."),
+    );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+    rmSync(homeDir, { recursive: true, force: true });
+  }
 });
 
 test("buildDynamicContext includes cwd and current git context", async () => {
