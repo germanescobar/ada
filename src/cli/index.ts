@@ -31,6 +31,7 @@ import {
   groupModelOptions,
   MODEL_OPTIONS,
   type ModelOption,
+  type ModelOptionsResult,
 } from "../models/resolve.js";
 import { loadSkills, type Skill } from "../skills/skills.js";
 
@@ -60,6 +61,17 @@ export function formatModelOptions(
       return [group.group, ...lines].join("\n");
     })
     .join("\n\n");
+}
+
+export function formatModelOptionsJson(result: ModelOptionsResult): string {
+  return JSON.stringify(
+    {
+      models: result.options,
+      ollamaDiscoveryFailed: result.ollamaDiscoveryFailed,
+    },
+    null,
+    2
+  );
 }
 
 function formatCapabilities(option: ModelOption): string {
@@ -128,8 +140,14 @@ export function createCLI() {
   program
     .command("models")
     .description("List supported model choices")
-    .action(async () => {
+    .option("--json", "Emit machine-readable JSON")
+    .action(async (options: { json?: boolean }) => {
       const result = await getModelOptions();
+      if (options.json) {
+        console.log(formatModelOptionsJson(result));
+        return;
+      }
+
       console.log(formatModelOptions(result.options));
       if (result.ollamaDiscoveryFailed) {
         console.error(
