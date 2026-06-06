@@ -32,7 +32,7 @@ import {
 } from "../models/resolve.js";
 import { loadSkills, type Skill } from "../skills/skills.js";
 
-const DEFAULT_MODEL = "anthropic/claude-sonnet-4-6";
+const DEFAULT_MODEL = "ollama/glm-4.7-flash:latest";
 const AGENTS_TEMPLATE = `# AGENTS.md
 
 Describe the coding guidelines, project conventions, and operational constraints Ada should follow.

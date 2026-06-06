@@ -7,7 +7,7 @@ export interface SessionState {
   id: string;
   title?: string;
   workingDirectory: string;
-  model: string; // e.g., "anthropic/claude-sonnet-4-6"
+  model: string; // e.g., "ollama/glm-4.7-flash:latest"
   conversationItems: ConversationItem[];
   messages: Message[];
   contextBudget?: SessionContextBudget;

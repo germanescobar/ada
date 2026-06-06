@@ -8,18 +8,10 @@ import {
   OLLAMA_CLOUD_MODELS,
   getModelContextWindowTokens,
   parseModelString,
-  type ProviderConfig,
   resolveProviderConfig,
 } from "../src/models/resolve.js";
 
 type MockFetch = typeof fetch;
-
-function assertOpenAICompatible(
-  config: ProviderConfig
-): Extract<ProviderConfig, { type: "openai-compatible" }> {
-  assert.equal(config.type, "openai-compatible");
-  return config;
-}
 
 function withEnv<T>(
   env: Record<string, string | undefined>,
@@ -87,30 +79,29 @@ test("ollama-cloud rejects unsupported models", () => {
     () => resolveProviderConfig("ollama-cloud/llama3.2"),
     /Unsupported Ollama Cloud model: "llama3\.2"/
   );
+  assert.throws(
+    () => resolveProviderConfig("ollama-cloud/deepseek-v3.2"),
+    /Unsupported Ollama Cloud model: "deepseek-v3\.2"/
+  );
+  assert.throws(
+    () => resolveProviderConfig("ollama-cloud/kimi-k2-thinking"),
+    /Unsupported Ollama Cloud model: "kimi-k2-thinking"/
+  );
 });
 
 test("ollama-cloud requires its own API key", () => {
   withEnv(
-    { OLLAMA_API_KEY: undefined, OPENAI_API_KEY: "test-openai-key" },
+    { OLLAMA_API_KEY: undefined },
     () => {
       assert.throws(
-        () => resolveProviderConfig("ollama-cloud/deepseek-v3.2"),
+        () => resolveProviderConfig("ollama-cloud/deepseek-v4-pro"),
         /OLLAMA_API_KEY is required/
       );
     }
   );
 });
 
-test("openai resolves to the Responses API provider", () => {
-  const config = resolveProviderConfig("openai/gpt-4");
-  assert.equal(config.type, "openai-responses");
-  if (config.type === "openai-responses") {
-    assert.equal(config.provider, "openai");
-    assert.equal(config.model, "gpt-4");
-  }
-});
-
-test("existing OpenAI-compatible providers keep their defaults", () => {
+test("supported OpenAI-compatible providers keep their defaults", () => {
   assert.deepEqual(resolveProviderConfig("ollama/glm-4.7-flash:latest"), {
     type: "openai-compatible",
     provider: "ollama",
@@ -118,23 +109,9 @@ test("existing OpenAI-compatible providers keep their defaults", () => {
     contextWindowTokens: 198_000,
     baseURL: "http://localhost:11434/v1",
   });
-
-  withEnv({ GROQ_API_KEY: "test-groq-key" }, () => {
-    assert.deepEqual(resolveProviderConfig("groq/llama-3.3-70b-versatile"), {
-      type: "openai-compatible",
-      provider: "groq",
-      model: "llama-3.3-70b-versatile",
-      contextWindowTokens: 128_000,
-      apiKey: "test-groq-key",
-      baseURL: "https://api.groq.com/openai/v1",
-    });
-  });
 });
 
 test("model context windows are available for compaction budgeting", () => {
-  assert.equal(getModelContextWindowTokens("anthropic/claude-sonnet-4-6"), 1_000_000);
-  assert.equal(getModelContextWindowTokens("openai/gpt-4"), 8_192);
-  assert.equal(getModelContextWindowTokens("openai/gpt-3.5-turbo"), 16_385);
   assert.equal(getModelContextWindowTokens("openrouter/z-ai/glm-5.1"), 198_000);
   assert.equal(
     getModelContextWindowTokens("openrouter/deepseek/deepseek-v4-pro"),
@@ -145,8 +122,8 @@ test("model context windows are available for compaction budgeting", () => {
     256_000
   );
   assert.equal(getModelContextWindowTokens("ollama-cloud/minimax-m2.7"), 200_000);
-  assert.equal(getModelContextWindowTokens("ollama-cloud/deepseek-v3.2"), 160_000);
-  assert.equal(getModelContextWindowTokens("ollama-cloud/kimi-k2-thinking"), 256_000);
+  assert.equal(getModelContextWindowTokens("ollama-cloud/deepseek-v4-pro"), 1_000_000);
+  assert.equal(getModelContextWindowTokens("ollama-cloud/kimi-k2.6"), 256_000);
   assert.equal(getModelContextWindowTokens("ollama/custom-model"), 128_000);
 });
 
@@ -163,6 +140,12 @@ test("model options separate Ollama local and Ollama Cloud choices", () => {
     cloudOptions.map((option) => option.value),
     OLLAMA_CLOUD_MODELS.map((model) => `ollama-cloud/${model}`)
   );
+  assert.deepEqual(cloudOptions.map((option) => option.value), [
+    "ollama-cloud/glm-5.1",
+    "ollama-cloud/minimax-m2.7",
+    "ollama-cloud/deepseek-v4-pro",
+    "ollama-cloud/kimi-k2.6",
+  ]);
 });
 
 test("discovers installed local Ollama models from the tags API", async () => {

@@ -1,12 +1,9 @@
 import type { ModelProvider } from "./provider.js";
-import { AnthropicProvider } from "./anthropic.js";
 import { OpenAIProvider } from "./openai.js";
-import { OpenAIResponsesProvider } from "./openai-responses.js";
 
 const OLLAMA_BASE_URL = "http://localhost:11434/v1";
 const OLLAMA_TAGS_URL = "http://localhost:11434/api/tags";
 const OLLAMA_CLOUD_BASE_URL = "https://ollama.com/v1";
-const GROQ_BASE_URL = "https://api.groq.com/openai/v1";
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 const OLLAMA_DISCOVERY_TIMEOUT_MS = 1_000;
 const OLLAMA_CLOUD_MAX_TOKENS = 8_192;
@@ -18,10 +15,8 @@ const KIMI_K2_CONTEXT_WINDOW_TOKENS = 256_000;
 export const OLLAMA_CLOUD_MODELS = [
   "glm-5.1",
   "minimax-m2.7",
-  "deepseek-v3.2",
   "deepseek-v4-pro",
   "kimi-k2.6",
-  "kimi-k2-thinking",
 ] as const;
 
 const OLLAMA_CLOUD_CONTEXT_WINDOWS: Record<
@@ -30,15 +25,11 @@ const OLLAMA_CLOUD_CONTEXT_WINDOWS: Record<
 > = {
   "glm-5.1": GLM_CONTEXT_WINDOW_TOKENS,
   "minimax-m2.7": 200_000,
-  "deepseek-v3.2": 160_000,
   "deepseek-v4-pro": DEEPSEEK_V4_PRO_CONTEXT_WINDOW_TOKENS,
   "kimi-k2.6": KIMI_K2_CONTEXT_WINDOW_TOKENS,
-  "kimi-k2-thinking": KIMI_K2_CONTEXT_WINDOW_TOKENS,
 };
 
 export type ModelOptionGroupName =
-  | "Anthropic"
-  | "OpenAI"
   | "Ollama Local"
   | "Ollama Cloud"
   | "OpenRouter";
@@ -51,24 +42,6 @@ export interface ModelOption {
 }
 
 export const MODEL_OPTIONS: readonly ModelOption[] = [
-  {
-    label: "Claude Sonnet 4.6",
-    value: "anthropic/claude-sonnet-4-6",
-    group: "Anthropic",
-    contextWindowTokens: 1_000_000,
-  },
-  {
-    label: "GPT-4",
-    value: "openai/gpt-4",
-    group: "OpenAI",
-    contextWindowTokens: 8_192,
-  },
-  {
-    label: "GPT-3.5 Turbo",
-    value: "openai/gpt-3.5-turbo",
-    group: "OpenAI",
-    contextWindowTokens: 16_385,
-  },
   {
     label: "GLM 4.7 Flash (local)",
     value: "ollama/glm-4.7-flash:latest",
@@ -117,33 +90,21 @@ export interface ResolvedModel {
 }
 
 export type ProviderConfig =
-  | {
-      type: "anthropic";
-      provider: string;
-      model: string;
-      contextWindowTokens: number;
-    }
-  | {
-      type: "openai-responses";
-      provider: string;
-      model: string;
-      contextWindowTokens: number;
-    }
-  | {
-      type: "openai-compatible";
-      provider: string;
-      model: string;
-      contextWindowTokens: number;
-      apiKey?: string;
-      baseURL?: string;
-      maxTokens?: number;
-    };
+  {
+    type: "openai-compatible";
+    provider: string;
+    model: string;
+    contextWindowTokens: number;
+    apiKey?: string;
+    baseURL?: string;
+    maxTokens?: number;
+  };
 
 export function parseModelString(modelString: string): ResolvedModel {
   const slashIndex = modelString.indexOf("/");
   if (slashIndex === -1) {
     throw new Error(
-      `Invalid model format: "${modelString}". Expected "provider/model" (e.g., "anthropic/claude-sonnet-4-6")`
+      `Invalid model format: "${modelString}". Expected "provider/model" (e.g., "ollama/glm-4.7-flash:latest")`
     );
   }
   return {
@@ -243,27 +204,6 @@ export function resolveProviderConfig(modelString: string): ProviderConfig {
   const contextWindowTokens = getModelContextWindowTokens(modelString);
 
   switch (provider) {
-    case "anthropic":
-      return { type: "anthropic", provider, model, contextWindowTokens };
-
-    case "openai":
-      return {
-        type: "openai-responses",
-        provider,
-        model,
-        contextWindowTokens,
-      };
-
-    case "groq":
-      return {
-        type: "openai-compatible",
-        provider,
-        model,
-        contextWindowTokens,
-        apiKey: process.env.GROQ_API_KEY,
-        baseURL: GROQ_BASE_URL,
-      };
-
     case "ollama":
       return {
         type: "openai-compatible",
@@ -307,21 +247,13 @@ export function resolveProviderConfig(modelString: string): ProviderConfig {
 
     default:
       throw new Error(
-        `Unknown provider: "${provider}". Supported: anthropic, openai, groq, ollama, ollama-cloud, openrouter`
+        `Unknown provider: "${provider}". Supported: ollama, ollama-cloud, openrouter`
       );
   }
 }
 
 export function createProvider(modelString: string): ModelProvider {
   const config = resolveProviderConfig(modelString);
-
-  if (config.type === "anthropic") {
-    return new AnthropicProvider(config.model);
-  }
-
-  if (config.type === "openai-responses") {
-    return new OpenAIResponsesProvider(config.model);
-  }
 
   return new OpenAIProvider(config.model, {
     apiKey: config.apiKey,
