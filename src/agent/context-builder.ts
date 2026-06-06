@@ -24,6 +24,7 @@ You have these tools available:
 
 Instructions:
 - Use tools to explore and understand the codebase before making changes
+- Prefer rg for repository text searches when available; fall back to grep only when rg is unavailable
 - Always read a file before editing it
 - Run tests or checks after making changes when appropriate
 - Follow the instructions of the user without jumping ahead.

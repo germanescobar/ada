@@ -75,7 +75,7 @@ const DEFAULT_POLICY_CONTEXT: PolicyContext = {
       toolName: "run_command",
       decision: "allow",
       description:
-        "Common inspection commands are allowed, including ls, cat, head, tail, wc, find, grep, git status/diff/log/branch/show, pwd, echo, which, node --version, and npm list/ls/outdated/view.",
+        "Common inspection commands are allowed, including ls, cat, head, tail, wc, find, rg, grep fallback when rg is unavailable, git status/diff/log/branch/show, pwd, echo, which, node --version, and npm list/ls/outdated/view.",
     },
     {
       toolName: "run_command",
@@ -135,6 +135,10 @@ export class PolicyEngine {
           if (pattern.test(cmd)) return "deny";
         }
 
+        if (isRipgrepCommand(cmd)) {
+          return usesRipgrepPreprocessor(cmd) ? "ask" : "allow";
+        }
+
         for (const pattern of SAFE_COMMAND_PATTERNS) {
           if (pattern.test(cmd)) return "allow";
         }
@@ -145,4 +149,72 @@ export class PolicyEngine {
 
     return engine;
   }
+}
+
+function isRipgrepCommand(cmd: string): boolean {
+  return /^rg\b/.test(cmd);
+}
+
+function usesRipgrepPreprocessor(cmd: string): boolean {
+  const tokens = tokenizeShellCommand(cmd);
+  let parsingFlags = true;
+
+  for (const token of tokens.slice(1)) {
+    if (!parsingFlags) return false;
+    if (token === "--") {
+      parsingFlags = false;
+      continue;
+    }
+    if (token === "--pre" || token.startsWith("--pre=")) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function tokenizeShellCommand(cmd: string): string[] {
+  const tokens: string[] = [];
+  let current = "";
+  let quote: "'" | "\"" | null = null;
+
+  for (let i = 0; i < cmd.length; i += 1) {
+    const char = cmd[i];
+
+    if (quote) {
+      if (char === quote) {
+        quote = null;
+      } else if (char === "\\" && quote === "\"" && i + 1 < cmd.length) {
+        i += 1;
+        current += cmd[i];
+      } else {
+        current += char;
+      }
+      continue;
+    }
+
+    if (char === "'" || char === "\"") {
+      quote = char;
+      continue;
+    }
+
+    if (/\s/.test(char)) {
+      if (current) {
+        tokens.push(current);
+        current = "";
+      }
+      continue;
+    }
+
+    if (char === "\\" && i + 1 < cmd.length) {
+      i += 1;
+      current += cmd[i];
+      continue;
+    }
+
+    current += char;
+  }
+
+  if (current) tokens.push(current);
+  return tokens;
 }
