@@ -11,10 +11,13 @@ const UNKNOWN_MODEL_CONTEXT_WINDOW_TOKENS = 128_000;
 const GLM_CONTEXT_WINDOW_TOKENS = 198_000;
 const DEEPSEEK_V4_PRO_CONTEXT_WINDOW_TOKENS = 1_000_000;
 const KIMI_K2_CONTEXT_WINDOW_TOKENS = 256_000;
+const MINIMAX_M3_OLLAMA_CONTEXT_WINDOW_TOKENS = 512_000;
+const MINIMAX_M3_OPENROUTER_CONTEXT_WINDOW_TOKENS = 1_000_000;
 
 export const OLLAMA_CLOUD_MODELS = [
   "glm-5.1",
   "minimax-m2.7",
+  "minimax-m3",
   "deepseek-v4-pro",
   "kimi-k2.6",
 ] as const;
@@ -25,6 +28,7 @@ const OLLAMA_CLOUD_CONTEXT_WINDOWS: Record<
 > = {
   "glm-5.1": GLM_CONTEXT_WINDOW_TOKENS,
   "minimax-m2.7": 200_000,
+  "minimax-m3": MINIMAX_M3_OLLAMA_CONTEXT_WINDOW_TOKENS,
   "deepseek-v4-pro": DEEPSEEK_V4_PRO_CONTEXT_WINDOW_TOKENS,
   "kimi-k2.6": KIMI_K2_CONTEXT_WINDOW_TOKENS,
 };
@@ -64,6 +68,12 @@ export const MODEL_OPTIONS: readonly ModelOption[] = [
     group: "OpenRouter",
     contextWindowTokens: GLM_CONTEXT_WINDOW_TOKENS,
     capabilities: { attachments: { images: false, files: true } },
+  },
+  {
+    label: "MiniMax M3 (OpenRouter)",
+    value: "openrouter/minimax/minimax-m3",
+    group: "OpenRouter",
+    contextWindowTokens: MINIMAX_M3_OPENROUTER_CONTEXT_WINDOW_TOKENS,
   },
   {
     label: "DeepSeek V4 Pro (OpenRouter)",

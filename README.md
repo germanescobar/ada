@@ -166,6 +166,7 @@ Supported Ollama Cloud models:
 
 - `ollama-cloud/glm-5.1`
 - `ollama-cloud/minimax-m2.7`
+- `ollama-cloud/minimax-m3`
 - `ollama-cloud/deepseek-v4-pro`
 - `ollama-cloud/kimi-k2.6`
 
@@ -291,9 +292,11 @@ Available providers (provider/model format):
 - `ollama/<local-model>`
 - `ollama-cloud/glm-5.1`
 - `ollama-cloud/minimax-m2.7`
+- `ollama-cloud/minimax-m3`
 - `ollama-cloud/deepseek-v4-pro`
 - `ollama-cloud/kimi-k2.6`
 - `openrouter/z-ai/glm-5.1`
+- `openrouter/minimax/minimax-m3`
 - `openrouter/deepseek/deepseek-v4-pro`
 - `openrouter/moonshotai/kimi-k2.6`
 

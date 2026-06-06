@@ -115,6 +115,10 @@ test("supported OpenAI-compatible providers keep their defaults", () => {
 test("model context windows are available for compaction budgeting", () => {
   assert.equal(getModelContextWindowTokens("openrouter/z-ai/glm-5.1"), 198_000);
   assert.equal(
+    getModelContextWindowTokens("openrouter/minimax/minimax-m3"),
+    1_000_000
+  );
+  assert.equal(
     getModelContextWindowTokens("openrouter/deepseek/deepseek-v4-pro"),
     1_000_000
   );
@@ -123,6 +127,7 @@ test("model context windows are available for compaction budgeting", () => {
     256_000
   );
   assert.equal(getModelContextWindowTokens("ollama-cloud/minimax-m2.7"), 200_000);
+  assert.equal(getModelContextWindowTokens("ollama-cloud/minimax-m3"), 512_000);
   assert.equal(getModelContextWindowTokens("ollama-cloud/deepseek-v4-pro"), 1_000_000);
   assert.equal(getModelContextWindowTokens("ollama-cloud/kimi-k2.6"), 256_000);
   assert.equal(getModelContextWindowTokens("ollama/custom-model"), 128_000);
@@ -163,6 +168,7 @@ test("model options separate Ollama local and Ollama Cloud choices", () => {
   assert.deepEqual(cloudOptions.map((option) => option.value), [
     "ollama-cloud/glm-5.1",
     "ollama-cloud/minimax-m2.7",
+    "ollama-cloud/minimax-m3",
     "ollama-cloud/deepseek-v4-pro",
     "ollama-cloud/kimi-k2.6",
   ]);
