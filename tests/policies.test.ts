@@ -12,6 +12,32 @@ test("default policy allows rg for repository searches", () => {
   );
 });
 
+test("default policy requires approval for rg preprocessors", () => {
+  const policyEngine = PolicyEngine.withDefaults();
+
+  assert.equal(
+    policyEngine.evaluate("run_command", {
+      command: "rg --pre /bin/sh searchTerm src",
+    }),
+    "ask"
+  );
+  assert.equal(
+    policyEngine.evaluate("run_command", {
+      command: "rg --pre=/bin/sh searchTerm src",
+    }),
+    "ask"
+  );
+});
+
+test("default policy allows rg searches for literal preprocessor flag text", () => {
+  const policyEngine = PolicyEngine.withDefaults();
+
+  assert.equal(
+    policyEngine.evaluate("run_command", { command: "rg -- --pre src" }),
+    "allow"
+  );
+});
+
 test("default policy still allows grep as the search fallback", () => {
   const policyEngine = PolicyEngine.withDefaults();
 
