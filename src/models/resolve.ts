@@ -52,7 +52,7 @@ export const MODEL_OPTIONS: readonly ModelOption[] = [
   },
   {
     label: "GLM 5.1 (OpenRouter)",
-    value: "openrouter/zhipuai/glm-5.1",
+    value: "openrouter/z-ai/glm-5.1",
     group: "OpenRouter",
   },
   {
@@ -62,7 +62,7 @@ export const MODEL_OPTIONS: readonly ModelOption[] = [
   },
   {
     label: "Kimi K2.6 (OpenRouter)",
-    value: "openrouter/moonshotai/kimi-k2-6",
+    value: "openrouter/moonshotai/kimi-k2.6",
     group: "OpenRouter",
   },
   ...OLLAMA_CLOUD_MODELS.map((model): ModelOption => ({
