@@ -1,5 +1,6 @@
 import chalk from "chalk";
 import type { ModelProvider, ModelStreamEvent } from "../models/provider.js";
+import { getModelContextWindowTokens } from "../models/resolve.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { EventStore } from "../storage/event-store.js";
 import type { SessionStore } from "../storage/session-store.js";
@@ -19,16 +20,25 @@ import { Executor } from "./executor.js";
 
 const MAX_ITERATIONS = 50;
 const COMPACTION_SUMMARY_HEADER = "Previous conversation summary:";
+const COMPACTION_SUMMARIZER_SYSTEM_PROMPT = `You update a rolling summary for an AI coding agent conversation.
+
+Preserve durable facts, user intent, decisions, constraints, files changed or inspected, tool results that matter, errors, and unresolved next steps.
+Remove repetition, incidental chatter, and details that no longer affect future work.
+Return only the updated summary text.`;
 export const DEFAULT_CONTEXT_BUDGET: ContextBudgetOptions = {
-  thresholdTokens: 120_000,
-  preserveRecentMessages: 8,
-  summaryMaxCharacters: 6_000,
+  compactAtRatio: 0.8,
+  reservedResponseTokens: 16_000,
+  keepRecentTokens: 24_000,
+  minSummarizableTokens: 8_000,
+  targetSummaryTokens: 3_000,
 };
 
 export interface ContextBudgetOptions {
-  thresholdTokens: number;
-  preserveRecentMessages: number;
-  summaryMaxCharacters?: number;
+  compactAtRatio: number;
+  reservedResponseTokens: number;
+  keepRecentTokens: number;
+  minSummarizableTokens: number;
+  targetSummaryTokens: number;
 }
 
 export class AgentLoop {
@@ -75,9 +85,9 @@ export class AgentLoop {
       });
 
       for (let i = 0; i < MAX_ITERATIONS; i++) {
-        await this.compactSessionIfNeeded(session);
+        const modelContextItems = await this.buildModelContextItems(session);
         const conversationItems = await this.contextBuilder.buildItemsWithDynamicContext(
-          session.conversationItems
+          modelContextItems
         );
         const response = await this.getModelResponse({
           systemPrompt,
@@ -247,69 +257,118 @@ export class AgentLoop {
     await this.sessionStore.save(session);
   }
 
-  private async compactSessionIfNeeded(session: SessionState): Promise<void> {
+  private async buildModelContextItems(
+    session: SessionState
+  ): Promise<ConversationItem[]> {
     this.normalizeSession(session);
-    const beforeTokens = this.estimateConversationTokens(session.conversationItems);
+    const thresholdTokens = this.getCompactionThresholdTokens(session.model);
     this.updateContextBudget(session);
 
-    if (beforeTokens <= this.contextBudget.thresholdTokens) return;
-
-    const existingSummary = this.extractCompactionSummary(session.conversationItems[0]);
-    const compactableMessages = existingSummary
-      ? session.conversationItems.slice(1)
-      : session.conversationItems;
-    const preserveCount = Math.max(1, this.contextBudget.preserveRecentMessages);
-
-    if (compactableMessages.length <= preserveCount) return;
-
-    const splitIndex = this.findSafeCompactionSplitIndex(
-      compactableMessages,
-      compactableMessages.length - preserveCount
+    const existingSummary = session.contextBudget?.compactionSummary;
+    const summarizedItemCount = Math.min(
+      session.contextBudget?.summarizedItemCount ?? 0,
+      session.conversationItems.length
     );
-    if (splitIndex <= 0) return;
+    const currentModelItems = this.buildCompactedItems(
+      existingSummary,
+      session.conversationItems.slice(summarizedItemCount)
+    );
+    const beforeTokens = this.estimateConversationTokens(currentModelItems);
 
-    const olderItems = compactableMessages.slice(0, splitIndex);
-    const recentItems = compactableMessages.slice(splitIndex);
-    const summary = this.buildCompactionSummary(existingSummary, olderItems);
+    if (beforeTokens <= thresholdTokens) return currentModelItems;
 
-    session.conversationItems = [
-      {
-        type: "compaction_summary",
-        summary,
-      },
-      ...recentItems,
-    ];
+    const desiredSplitIndex = this.findRecentTailSplitIndex(
+      session.conversationItems,
+      this.contextBudget.keepRecentTokens
+    );
+    const splitIndex = this.findSafeCompactionSplitIndex(
+      session.conversationItems,
+      desiredSplitIndex
+    );
+    const nextItemsToSummarize = session.conversationItems.slice(
+      summarizedItemCount,
+      splitIndex
+    );
+    const summarizableTokens = this.estimateConversationTokens(nextItemsToSummarize);
 
-    const afterTokens = this.estimateConversationTokens(session.conversationItems);
+    if (
+      splitIndex <= summarizedItemCount ||
+      summarizableTokens < this.contextBudget.minSummarizableTokens
+    ) {
+      await this.appendCompactionSkipEvent(
+        session,
+        beforeTokens,
+        currentModelItems,
+        "eligible_prefix_too_small"
+      );
+      return currentModelItems;
+    }
+
+    const summary = await this.generateCompactionSummary(
+      existingSummary,
+      nextItemsToSummarize
+    );
+    const recentItems = session.conversationItems.slice(splitIndex);
+    const compactedItems = this.buildCompactedItems(summary, recentItems);
+    const afterTokens = this.estimateConversationTokens(compactedItems);
+
+    if (afterTokens >= beforeTokens) {
+      await this.appendCompactionSkipEvent(
+        session,
+        beforeTokens,
+        currentModelItems,
+        "no_meaningful_reduction"
+      );
+      return currentModelItems;
+    }
+
+    const summaryTokens = this.estimateConversationTokens([
+      { type: "compaction_summary", summary },
+    ]);
+    const preservedRecentTokens = this.estimateConversationTokens(recentItems);
     const compactedAt = new Date().toISOString();
+
     session.contextBudget = {
       ...session.contextBudget,
-      approximateTokens: afterTokens,
-      thresholdTokens: this.contextBudget.thresholdTokens,
-      preservedRecentMessages: recentItems.length,
+      approximateTokens: this.estimateConversationTokens(session.conversationItems),
+      thresholdTokens,
+      compactAtRatio: this.contextBudget.compactAtRatio,
+      reservedResponseTokens: this.contextBudget.reservedResponseTokens,
+      keepRecentTokens: this.contextBudget.keepRecentTokens,
+      minSummarizableTokens: this.contextBudget.minSummarizableTokens,
+      targetSummaryTokens: this.contextBudget.targetSummaryTokens,
+      preservedRecentTokens,
+      summaryTokens,
+      compactionSummary: summary,
+      summarizedItemCount: splitIndex,
       compactedAt,
     };
 
     await this.eventStore.append(session.id, "conversation_compaction", {
       beforeApproximateTokens: beforeTokens,
       afterApproximateTokens: afterTokens,
-      beforeMessages: compactableMessages.length + (existingSummary ? 1 : 0),
-      afterMessages: session.conversationItems.length,
-      summarizedMessages: olderItems.length,
-      preservedRecentMessages: recentItems.length,
+      summarizedMessages: nextItemsToSummarize.length,
+      preservedRecentTokens,
+      summaryTokens,
     });
     await this.saveSession(session);
+    return compactedItems;
   }
 
   private updateContextBudget(
     session: SessionState,
     usage?: { inputTokens: number; outputTokens: number }
   ): void {
+    const thresholdTokens = this.getCompactionThresholdTokens(session.model);
     session.contextBudget = {
       ...session.contextBudget,
       approximateTokens: this.estimateConversationTokens(session.conversationItems),
-      thresholdTokens: this.contextBudget.thresholdTokens,
-      preservedRecentMessages: this.contextBudget.preserveRecentMessages,
+      thresholdTokens,
+      compactAtRatio: this.contextBudget.compactAtRatio,
+      reservedResponseTokens: this.contextBudget.reservedResponseTokens,
+      keepRecentTokens: this.contextBudget.keepRecentTokens,
+      minSummarizableTokens: this.contextBudget.minSummarizableTokens,
+      targetSummaryTokens: this.contextBudget.targetSummaryTokens,
       lastProviderUsage: usage ?? session.contextBudget?.lastProviderUsage,
     };
   }
@@ -322,23 +381,94 @@ export class AgentLoop {
     return Math.ceil(characters / 4);
   }
 
-  private buildCompactionSummary(
+  private async generateCompactionSummary(
     existingSummary: string | undefined,
     items: ConversationItem[]
-  ): string {
-    const newSummary = items
+  ): Promise<string> {
+    const priorSummary = existingSummary
+      ? `Existing rolling summary:\n${existingSummary}`
+      : "Existing rolling summary: none";
+    const transcript = items
       .map((item) => `- ${item.type}: ${conversationItemToText(item)}`)
       .join("\n");
-    const lines = [
-      existingSummary ?? COMPACTION_SUMMARY_HEADER,
-      newSummary,
-    ].filter((line): line is string => Boolean(line));
+    const response = await this.provider.chat({
+      systemPrompt: `${COMPACTION_SUMMARIZER_SYSTEM_PROMPT}\n\nTarget about ${this.contextBudget.targetSummaryTokens} tokens.`,
+      conversationItems: [
+        {
+          type: "message",
+          role: "user",
+          content: `${priorSummary}\n\nNew transcript segment to fold into the rolling summary:\n${transcript}`,
+        },
+      ],
+      messages: [
+        {
+          role: "user",
+          content: `${priorSummary}\n\nNew transcript segment to fold into the rolling summary:\n${transcript}`,
+        },
+      ],
+      tools: [],
+    });
+    const summary = response.content
+      .filter((block) => block.type === "text")
+      .map((block) => block.text.trim())
+      .filter(Boolean)
+      .join("\n\n");
 
-    const summary = lines.join("\n");
-    const maxCharacters = this.contextBudget.summaryMaxCharacters;
-    if (!maxCharacters || summary.length <= maxCharacters) return summary;
+    if (!summary) {
+      throw new Error("Compaction summary model response did not include text.");
+    }
 
-    return this.truncateCompactionSummary(existingSummary, newSummary, maxCharacters);
+    return summary.startsWith(COMPACTION_SUMMARY_HEADER)
+      ? summary
+      : `${COMPACTION_SUMMARY_HEADER}\n${summary}`;
+  }
+
+  private buildCompactedItems(
+    summary: string | undefined,
+    recentItems: ConversationItem[]
+  ): ConversationItem[] {
+    if (!summary) return recentItems;
+    return [{ type: "compaction_summary", summary }, ...recentItems];
+  }
+
+  private findRecentTailSplitIndex(
+    items: ConversationItem[],
+    keepRecentTokens: number
+  ): number {
+    let recentTokens = 0;
+    for (let index = items.length; index > 0; index--) {
+      const itemTokens = this.estimateConversationTokens([items[index - 1]]);
+      if (recentTokens > 0 && recentTokens + itemTokens > keepRecentTokens) {
+        return index;
+      }
+      recentTokens += itemTokens;
+    }
+    return 0;
+  }
+
+  private getCompactionThresholdTokens(model: string): number {
+    const contextWindowTokens = getModelContextWindowTokens(model);
+    const usableTokens = Math.max(
+      1,
+      contextWindowTokens - this.contextBudget.reservedResponseTokens
+    );
+    return Math.floor(usableTokens * this.contextBudget.compactAtRatio);
+  }
+
+  private async appendCompactionSkipEvent(
+    session: SessionState,
+    beforeTokens: number,
+    modelItems: ConversationItem[],
+    skipReason: string
+  ): Promise<void> {
+    await this.eventStore.append(session.id, "conversation_compaction", {
+      beforeApproximateTokens: beforeTokens,
+      afterApproximateTokens: this.estimateConversationTokens(modelItems),
+      summarizedMessages: 0,
+      preservedRecentTokens: this.estimateConversationTokens(modelItems),
+      summaryTokens: session.contextBudget?.summaryTokens ?? 0,
+      skipReason,
+    });
   }
 
   private findSafeCompactionSplitIndex(
@@ -374,53 +504,6 @@ export class AgentLoop {
       item.type === "function_call" ||
       item.type === "function_output"
     );
-  }
-
-  private truncateCompactionSummary(
-    existingSummary: string | undefined,
-    newSummary: string,
-    maxCharacters: number
-  ): string {
-    const truncatedSuffix = "\n[truncated]";
-    if (!existingSummary) {
-      const summary = `${COMPACTION_SUMMARY_HEADER}\n${newSummary}`;
-      const contentLimit = Math.max(0, maxCharacters - truncatedSuffix.length);
-      return `${summary.slice(0, contentLimit).trimEnd()}${truncatedSuffix}`;
-    }
-
-    const marker = "[earlier summary truncated]";
-    const prefix = `${COMPACTION_SUMMARY_HEADER}\n${marker}\n`;
-    const existingBody = existingSummary.replace(COMPACTION_SUMMARY_HEADER, "").trim();
-
-    if (prefix.length + newSummary.length <= maxCharacters) {
-      const existingLimit = Math.max(
-        0,
-        maxCharacters - prefix.length - newSummary.length - 1
-      );
-      const existingTail = existingBody.slice(-existingLimit).trim();
-      return [prefix.trimEnd(), existingTail, newSummary]
-        .filter(Boolean)
-        .join("\n");
-    }
-
-    const contentLimit = Math.max(
-      0,
-      maxCharacters - prefix.length - truncatedSuffix.length
-    );
-    return `${prefix}${newSummary.slice(0, contentLimit).trimEnd()}${truncatedSuffix}`;
-  }
-
-  private extractCompactionSummary(item: ConversationItem | undefined): string | undefined {
-    if (!item) return undefined;
-    const text =
-      item.type === "compaction_summary"
-        ? item.summary
-        : item.type === "message" && item.role === "user"
-          ? item.content
-          : undefined;
-    if (!text) return undefined;
-    if (!text.startsWith(COMPACTION_SUMMARY_HEADER)) return undefined;
-    return text;
   }
 
   private createErrorToolResult(

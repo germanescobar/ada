@@ -8,7 +8,7 @@ An intelligent AI-powered coding agent that helps you write, edit, and run code.
 - **File System Tools** - Read, write, and edit files seamlessly
 - **Command Execution** - Run shell commands safely with approval prompts
 - **Session Management** - Resume previous conversations and track history
-- **Multi-Provider Support** - Switch between Anthropic Claude, OpenAI, Groq, local Ollama, and Ollama Cloud models
+- **Multi-Provider Support** - Switch between local Ollama, Ollama Cloud, and OpenRouter models
 - **Event Logging** - Track all interactions and tool executions
 - **Reasoning Capture** - Preserve provider-exposed reasoning traces when available
 - **Type-Safe** - Built with TypeScript for reliability and type safety
@@ -139,13 +139,9 @@ Use `--force` with either command to overwrite an existing file.
 
 ### Context Compaction
 
-Ada tracks an approximate context budget for each session. When a transcript exceeds the threshold, older messages are replaced with a summary while recent messages, including recent tool calls and tool results, remain available verbatim.
+Ada tracks an approximate context budget for each session. When the model context reaches a high-water mark for the selected model's context window, Ada folds older history into a rolling summary while keeping a recent token-budgeted tail, including recent tool calls and tool results, available verbatim.
 
-```bash
-ada chat "Continue the refactor" --context-threshold-tokens 120000 --context-preserve-messages 8
-```
-
-By default, compaction starts around 120,000 estimated tokens and preserves the 8 most recent messages.
+By default, compaction starts around 80% of the usable model context window after reserving response tokens, preserves roughly 24,000 recent tokens, and skips compaction when the older prefix is too small to reduce context meaningfully.
 
 ### Ollama Cloud
 
@@ -160,10 +156,8 @@ Supported Ollama Cloud models:
 
 - `ollama-cloud/glm-5.1`
 - `ollama-cloud/minimax-m2.7`
-- `ollama-cloud/deepseek-v3.2`
 - `ollama-cloud/deepseek-v4-pro`
 - `ollama-cloud/kimi-k2.6`
-- `ollama-cloud/kimi-k2-thinking`
 
 Ollama Cloud requests use an explicit `max_tokens` value of 8192 so the provider leaves context room for the prompt.
 
@@ -178,7 +172,7 @@ ada chat "Add a hello world script" --stream-json
 Example stream:
 
 ```json
-{"type":"run.started","sessionId":"9e6f8a7d-7ff1-4c2c-b3d8-9c3ed5a1d4b7","model":"anthropic/claude-sonnet-4-6","workingDirectory":"/path/to/project","timestamp":"2026-04-09T15:00:00.000Z"}
+{"type":"run.started","sessionId":"9e6f8a7d-7ff1-4c2c-b3d8-9c3ed5a1d4b7","model":"ollama/glm-4.7-flash:latest","workingDirectory":"/path/to/project","timestamp":"2026-04-09T15:00:00.000Z"}
 {"type":"assistant.reasoning","text":"I should inspect the project structure before changing files."}
 {"type":"assistant.text","text":"I added a hello world script."}
 {"type":"tool.call","id":"toolu_123","name":"write_file","input":{"path":"hello.js","content":"console.log(\"hello world\");\n"}}
@@ -217,7 +211,7 @@ The Coding Agent is built with a modular architecture:
 - **Agent Loop** - Manages the conversation cycle, including message handling and tool execution
 - **Context Builder** - Separates stable agent instructions from dynamic environment context
 - **Executor** - Executes AI-generated tool calls with safety policies
-- **Provider** - Abstracts AI model interactions (Anthropic, OpenAI)
+- **Provider** - Abstracts OpenAI-compatible AI model interactions
 - **Tool Registry** - Manages available tools and their schemas
 
 ### Storage Layer
@@ -246,8 +240,8 @@ coding-agent/
 │   ├── cli/
 │   │   └── index.ts               # Command-line interface
 │   ├── models/
-│   │   ├── anthropic.ts           # Anthropic Claude integration
-│   │   ├── openai.ts              # OpenAI integration
+│   │   ├── anthropic.ts           # Anthropic Claude provider implementation
+│   │   ├── openai.ts              # OpenAI-compatible provider implementation
 │   │   ├── provider.ts            # AI provider abstraction
 │   │   └── resolve.ts             # Provider factory
 │   ├── storage/
@@ -284,20 +278,16 @@ coding-agent/
 
 Available providers (provider/model format):
 
-- `anthropic/claude-sonnet-4-6`
-- `anthropic/claude-3-5-sonnet-2024-22-16`
-- `openai/gpt-4`
-- `openai/gpt-3.5-turbo`
-- `groq/<model>`
 - `ollama/<local-model>`
 - `ollama-cloud/glm-5.1`
 - `ollama-cloud/minimax-m2.7`
-- `ollama-cloud/deepseek-v3.2`
 - `ollama-cloud/deepseek-v4-pro`
 - `ollama-cloud/kimi-k2.6`
-- `ollama-cloud/kimi-k2-thinking`
+- `openrouter/z-ai/glm-5.1`
+- `openrouter/deepseek/deepseek-v4-pro`
+- `openrouter/moonshotai/kimi-k2.6`
 
-`ollama/<local-model>` targets `http://localhost:11434/v1`. `ollama-cloud/<model>` targets Ollama Cloud and uses `OLLAMA_API_KEY`.
+`ollama/<local-model>` targets `http://localhost:11434/v1`. `ollama-cloud/<model>` targets Ollama Cloud and uses `OLLAMA_API_KEY`. `openrouter/<model>` targets OpenRouter and uses `OPENROUTER_API_KEY`.
 
 ## Configuration
 
