@@ -115,6 +115,7 @@ test("buildDynamicContext includes explicit permission policy when provided", as
     assert.match(context, /Default decision: allowed/);
     assert.match(context, /read_file: allowed - File reads are allowed\./);
     assert.match(context, /run_command: denied - Commands matching dangerous patterns/);
+    assert.match(context, /rg, grep fallback when rg is unavailable/);
     assert.match(
       context,
       /run_command: approval required - Other shell commands require approval/

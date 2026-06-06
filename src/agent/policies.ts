@@ -25,6 +25,7 @@ const SAFE_COMMAND_PATTERNS = [
   /^tail\b/,
   /^wc\b/,
   /^find\b/,
+  /^rg\b/,
   /^grep\b/,
   /^git\s+(status|diff|log|branch|show)\b/,
   /^pwd$/,
@@ -75,7 +76,7 @@ const DEFAULT_POLICY_CONTEXT: PolicyContext = {
       toolName: "run_command",
       decision: "allow",
       description:
-        "Common inspection commands are allowed, including ls, cat, head, tail, wc, find, grep, git status/diff/log/branch/show, pwd, echo, which, node --version, and npm list/ls/outdated/view.",
+        "Common inspection commands are allowed, including ls, cat, head, tail, wc, find, rg, grep fallback when rg is unavailable, git status/diff/log/branch/show, pwd, echo, which, node --version, and npm list/ls/outdated/view.",
     },
     {
       toolName: "run_command",
