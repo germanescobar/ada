@@ -2,7 +2,7 @@ import readline from "node:readline";
 import fs from "node:fs/promises";
 import path from "node:path";
 import chalk from "chalk";
-import { Command, InvalidArgumentError } from "commander";
+import { Command } from "commander";
 
 import { EventStore } from "../storage/event-store.js";
 import { SessionStore } from "../storage/session-store.js";
@@ -21,8 +21,6 @@ import {
 import { Executor } from "../agent/executor.js";
 import {
   AgentLoop,
-  DEFAULT_CONTEXT_BUDGET,
-  type ContextBudgetOptions,
 } from "../agent/loop.js";
 import { SessionManager } from "../agent/session.js";
 import {
@@ -59,58 +57,6 @@ export function formatModelOptions(
       return [group.group, ...lines].join("\n");
     })
     .join("\n\n");
-}
-
-function parsePositiveInteger(value: string): number {
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed < 1) {
-    throw new InvalidArgumentError("must be a positive integer");
-  }
-  return parsed;
-}
-
-function parseRatio(value: string): number {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed <= 0 || parsed >= 1) {
-    throw new InvalidArgumentError("must be greater than 0 and less than 1");
-  }
-  return parsed;
-}
-
-function buildContextBudgetOptions(options: {
-  contextCompactAtRatio?: number;
-  contextReservedResponseTokens?: number;
-  contextKeepRecentTokens?: number;
-  contextMinSummarizableTokens?: number;
-  contextTargetSummaryTokens?: number;
-}): ContextBudgetOptions | undefined {
-  if (
-    options.contextCompactAtRatio === undefined &&
-    options.contextReservedResponseTokens === undefined &&
-    options.contextKeepRecentTokens === undefined &&
-    options.contextMinSummarizableTokens === undefined &&
-    options.contextTargetSummaryTokens === undefined
-  ) {
-    return undefined;
-  }
-
-  return {
-    ...DEFAULT_CONTEXT_BUDGET,
-    compactAtRatio:
-      options.contextCompactAtRatio ?? DEFAULT_CONTEXT_BUDGET.compactAtRatio,
-    reservedResponseTokens:
-      options.contextReservedResponseTokens ??
-      DEFAULT_CONTEXT_BUDGET.reservedResponseTokens,
-    keepRecentTokens:
-      options.contextKeepRecentTokens ??
-      DEFAULT_CONTEXT_BUDGET.keepRecentTokens,
-    minSummarizableTokens:
-      options.contextMinSummarizableTokens ??
-      DEFAULT_CONTEXT_BUDGET.minSummarizableTokens,
-    targetSummaryTokens:
-      options.contextTargetSummaryTokens ??
-      DEFAULT_CONTEXT_BUDGET.targetSummaryTokens,
-  };
 }
 
 async function createAgentsFile(filePath: string, force: boolean): Promise<void> {
@@ -210,31 +156,6 @@ export function createCLI() {
     .option("--model <model>", "Model to use (provider/model)")
     .option("--stream-json", "Emit structured JSON events to stdout")
     .option("--auto-approve", "Auto-approve tool calls (dangerous commands are still denied)")
-    .option(
-      "--context-compact-at-ratio <ratio>",
-      "Model context-window ratio at which compaction starts",
-      parseRatio
-    )
-    .option(
-      "--context-reserved-response-tokens <tokens>",
-      "Approximate output budget to reserve when computing the compaction threshold",
-      parsePositiveInteger
-    )
-    .option(
-      "--context-keep-recent-tokens <tokens>",
-      "Approximate recent transcript tokens to keep verbatim during compaction",
-      parsePositiveInteger
-    )
-    .option(
-      "--context-min-summarizable-tokens <tokens>",
-      "Minimum older-prefix tokens required before compaction summarizes",
-      parsePositiveInteger
-    )
-    .option(
-      "--context-target-summary-tokens <tokens>",
-      "Approximate target size for model-generated rolling summaries",
-      parsePositiveInteger
-    )
     .option("--skill <path>", "Load a skill from a file or directory (repeatable)", (val, prev: string[]) => prev.concat(val), [] as string[])
     .option("--no-skills", "Disable automatic skill discovery (explicit --skill paths still load)")
     .action(async (
@@ -244,11 +165,6 @@ export function createCLI() {
         model?: string;
         autoApprove?: boolean;
         streamJson?: boolean;
-        contextCompactAtRatio?: number;
-        contextReservedResponseTokens?: number;
-        contextKeepRecentTokens?: number;
-        contextMinSummarizableTokens?: number;
-        contextTargetSummaryTokens?: number;
         skill?: string[];
         skills?: boolean;
       }
@@ -261,7 +177,6 @@ export function createCLI() {
       const model = options.model ?? parentOpts.model;
       const autoApprove = options.autoApprove ?? parentOpts.autoApprove;
       const streamJson = options.streamJson ?? parentOpts.streamJson ?? false;
-      const contextBudget = buildContextBudgetOptions(options);
       const cwd = process.cwd();
       const paths = getStoragePaths(cwd);
 
@@ -332,8 +247,7 @@ export function createCLI() {
         registry,
         eventStore,
         sessionStore,
-        streamJson,
-        contextBudget
+        streamJson
       );
 
       if (!streamJson) {

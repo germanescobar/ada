@@ -139,11 +139,7 @@ Use `--force` with either command to overwrite an existing file.
 
 ### Context Compaction
 
-Ada tracks an approximate context budget for each session. When the model context reaches a configurable ratio of the selected model's context window, Ada folds older history into a rolling summary while keeping a recent token-budgeted tail, including recent tool calls and tool results, available verbatim.
-
-```bash
-ada chat "Continue the refactor" --context-compact-at-ratio 0.8 --context-keep-recent-tokens 24000
-```
+Ada tracks an approximate context budget for each session. When the model context reaches a high-water mark for the selected model's context window, Ada folds older history into a rolling summary while keeping a recent token-budgeted tail, including recent tool calls and tool results, available verbatim.
 
 By default, compaction starts around 80% of the usable model context window after reserving response tokens, preserves roughly 24,000 recent tokens, and skips compaction when the older prefix is too small to reduce context meaningfully.
 

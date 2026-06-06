@@ -73,7 +73,7 @@ test("ollama-cloud resolves to the OpenAI-compatible cloud endpoint", () => {
         type: "openai-compatible",
         provider: "ollama-cloud",
         model: "glm-5.1",
-        contextWindowTokens: 128_000,
+        contextWindowTokens: 198_000,
         apiKey: "test-ollama-key",
         baseURL: "https://ollama.com/v1",
         maxTokens: 8192,
@@ -115,7 +115,7 @@ test("existing OpenAI-compatible providers keep their defaults", () => {
     type: "openai-compatible",
     provider: "ollama",
     model: "glm-4.7-flash:latest",
-    contextWindowTokens: 128_000,
+    contextWindowTokens: 198_000,
     baseURL: "http://localhost:11434/v1",
   });
 
@@ -132,8 +132,21 @@ test("existing OpenAI-compatible providers keep their defaults", () => {
 });
 
 test("model context windows are available for compaction budgeting", () => {
-  assert.equal(getModelContextWindowTokens("anthropic/claude-sonnet-4-6"), 200_000);
+  assert.equal(getModelContextWindowTokens("anthropic/claude-sonnet-4-6"), 1_000_000);
   assert.equal(getModelContextWindowTokens("openai/gpt-4"), 8_192);
+  assert.equal(getModelContextWindowTokens("openai/gpt-3.5-turbo"), 16_385);
+  assert.equal(getModelContextWindowTokens("openrouter/z-ai/glm-5.1"), 198_000);
+  assert.equal(
+    getModelContextWindowTokens("openrouter/deepseek/deepseek-v4-pro"),
+    1_000_000
+  );
+  assert.equal(
+    getModelContextWindowTokens("openrouter/moonshotai/kimi-k2.6"),
+    256_000
+  );
+  assert.equal(getModelContextWindowTokens("ollama-cloud/minimax-m2.7"), 200_000);
+  assert.equal(getModelContextWindowTokens("ollama-cloud/deepseek-v3.2"), 160_000);
+  assert.equal(getModelContextWindowTokens("ollama-cloud/kimi-k2-thinking"), 256_000);
   assert.equal(getModelContextWindowTokens("ollama/custom-model"), 128_000);
 });
 

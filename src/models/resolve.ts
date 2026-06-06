@@ -11,6 +11,9 @@ const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 const OLLAMA_DISCOVERY_TIMEOUT_MS = 1_000;
 const OLLAMA_CLOUD_MAX_TOKENS = 8_192;
 const UNKNOWN_MODEL_CONTEXT_WINDOW_TOKENS = 128_000;
+const GLM_CONTEXT_WINDOW_TOKENS = 198_000;
+const DEEPSEEK_V4_PRO_CONTEXT_WINDOW_TOKENS = 1_000_000;
+const KIMI_K2_CONTEXT_WINDOW_TOKENS = 256_000;
 
 export const OLLAMA_CLOUD_MODELS = [
   "glm-5.1",
@@ -20,6 +23,18 @@ export const OLLAMA_CLOUD_MODELS = [
   "kimi-k2.6",
   "kimi-k2-thinking",
 ] as const;
+
+const OLLAMA_CLOUD_CONTEXT_WINDOWS: Record<
+  (typeof OLLAMA_CLOUD_MODELS)[number],
+  number
+> = {
+  "glm-5.1": GLM_CONTEXT_WINDOW_TOKENS,
+  "minimax-m2.7": 200_000,
+  "deepseek-v3.2": 160_000,
+  "deepseek-v4-pro": DEEPSEEK_V4_PRO_CONTEXT_WINDOW_TOKENS,
+  "kimi-k2.6": KIMI_K2_CONTEXT_WINDOW_TOKENS,
+  "kimi-k2-thinking": KIMI_K2_CONTEXT_WINDOW_TOKENS,
+};
 
 export type ModelOptionGroupName =
   | "Anthropic"
@@ -40,7 +55,7 @@ export const MODEL_OPTIONS: readonly ModelOption[] = [
     label: "Claude Sonnet 4.6",
     value: "anthropic/claude-sonnet-4-6",
     group: "Anthropic",
-    contextWindowTokens: 200_000,
+    contextWindowTokens: 1_000_000,
   },
   {
     label: "GPT-4",
@@ -58,31 +73,31 @@ export const MODEL_OPTIONS: readonly ModelOption[] = [
     label: "GLM 4.7 Flash (local)",
     value: "ollama/glm-4.7-flash:latest",
     group: "Ollama Local",
-    contextWindowTokens: UNKNOWN_MODEL_CONTEXT_WINDOW_TOKENS,
+    contextWindowTokens: GLM_CONTEXT_WINDOW_TOKENS,
   },
   {
     label: "GLM 5.1 (OpenRouter)",
     value: "openrouter/z-ai/glm-5.1",
     group: "OpenRouter",
-    contextWindowTokens: UNKNOWN_MODEL_CONTEXT_WINDOW_TOKENS,
+    contextWindowTokens: GLM_CONTEXT_WINDOW_TOKENS,
   },
   {
     label: "DeepSeek V4 Pro (OpenRouter)",
     value: "openrouter/deepseek/deepseek-v4-pro",
     group: "OpenRouter",
-    contextWindowTokens: UNKNOWN_MODEL_CONTEXT_WINDOW_TOKENS,
+    contextWindowTokens: DEEPSEEK_V4_PRO_CONTEXT_WINDOW_TOKENS,
   },
   {
     label: "Kimi K2.6 (OpenRouter)",
     value: "openrouter/moonshotai/kimi-k2.6",
     group: "OpenRouter",
-    contextWindowTokens: UNKNOWN_MODEL_CONTEXT_WINDOW_TOKENS,
+    contextWindowTokens: KIMI_K2_CONTEXT_WINDOW_TOKENS,
   },
   ...OLLAMA_CLOUD_MODELS.map((model): ModelOption => ({
     label: `${model} (cloud)`,
     value: `ollama-cloud/${model}`,
     group: "Ollama Cloud",
-    contextWindowTokens: UNKNOWN_MODEL_CONTEXT_WINDOW_TOKENS,
+    contextWindowTokens: OLLAMA_CLOUD_CONTEXT_WINDOWS[model],
   })),
 ];
 
