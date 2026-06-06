@@ -13,6 +13,8 @@ test("formatModelOptions lists models grouped by provider", () => {
   assert.doesNotMatch(output, /^OpenAI\n/m);
   assert.match(output, /ollama\/glm-4\.7-flash:latest\s+GLM 4\.7 Flash \(local\)/);
   assert.match(output, /ollama-cloud\/glm-5\.1\s+glm-5\.1 \(cloud\)/);
+  assert.match(output, /ollama-cloud\/minimax-m3\s+minimax-m3 \(cloud\)/);
+  assert.match(output, /openrouter\/minimax\/minimax-m3\s+MiniMax M3 \(OpenRouter\)/);
   assert.match(output, /ollama-cloud\/deepseek-v4-pro\s+deepseek-v4-pro \(cloud\)/);
   assert.doesNotMatch(output, /ollama-cloud\/deepseek-v3\.2/);
   assert.doesNotMatch(output, /ollama-cloud\/kimi-k2-thinking/);
