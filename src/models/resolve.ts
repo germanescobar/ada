@@ -7,6 +7,7 @@ const OLLAMA_BASE_URL = "http://localhost:11434/v1";
 const OLLAMA_TAGS_URL = "http://localhost:11434/api/tags";
 const OLLAMA_CLOUD_BASE_URL = "https://ollama.com/v1";
 const GROQ_BASE_URL = "https://api.groq.com/openai/v1";
+const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 const OLLAMA_DISCOVERY_TIMEOUT_MS = 1_000;
 const OLLAMA_CLOUD_MAX_TOKENS = 8_192;
 
@@ -23,7 +24,8 @@ export type ModelOptionGroupName =
   | "Anthropic"
   | "OpenAI"
   | "Ollama Local"
-  | "Ollama Cloud";
+  | "Ollama Cloud"
+  | "OpenRouter";
 
 export interface ModelOption {
   label: string;
@@ -47,6 +49,21 @@ export const MODEL_OPTIONS: readonly ModelOption[] = [
     label: "GLM 4.7 Flash (local)",
     value: "ollama/glm-4.7-flash:latest",
     group: "Ollama Local",
+  },
+  {
+    label: "GLM 5.1 (OpenRouter)",
+    value: "openrouter/z-ai/glm-5.1",
+    group: "OpenRouter",
+  },
+  {
+    label: "DeepSeek V4 Pro (OpenRouter)",
+    value: "openrouter/deepseek/deepseek-v4-pro",
+    group: "OpenRouter",
+  },
+  {
+    label: "Kimi K2.6 (OpenRouter)",
+    value: "openrouter/moonshotai/kimi-k2.6",
+    group: "OpenRouter",
   },
   ...OLLAMA_CLOUD_MODELS.map((model): ModelOption => ({
     label: `${model} (cloud)`,
@@ -228,9 +245,23 @@ export function resolveProviderConfig(modelString: string): ProviderConfig {
         maxTokens: OLLAMA_CLOUD_MAX_TOKENS,
       };
 
+    case "openrouter":
+      if (!process.env.OPENROUTER_API_KEY) {
+        throw new Error(
+          "OPENROUTER_API_KEY is required for openrouter models. Set OPENROUTER_API_KEY and try again."
+        );
+      }
+      return {
+        type: "openai-compatible",
+        provider,
+        model,
+        apiKey: process.env.OPENROUTER_API_KEY,
+        baseURL: OPENROUTER_BASE_URL,
+      };
+
     default:
       throw new Error(
-        `Unknown provider: "${provider}". Supported: anthropic, openai, groq, ollama, ollama-cloud`
+        `Unknown provider: "${provider}". Supported: anthropic, openai, groq, ollama, ollama-cloud, openrouter`
       );
   }
 }
