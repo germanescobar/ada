@@ -19,21 +19,44 @@ type OpenAIUserContentPart =
       };
     };
 
+interface OpenAIProviderOptions {
+  apiKey?: string;
+  baseURL?: string;
+  maxTokens?: number;
+  openRouter?: boolean;
+}
+
+type ChatCompletionRequestWithOpenRouterFields =
+  OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming & {
+    session_id?: string;
+  };
+
+type ChatCompletionStreamRequestWithOpenRouterFields =
+  OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming & {
+    session_id?: string;
+  };
+
+type OpenAIUsageWithCacheDetails = OpenAI.Completions.CompletionUsage & {
+  prompt_tokens_details?: {
+    cached_tokens?: number;
+    cache_write_tokens?: number;
+  };
+};
+
 export class OpenAIProvider implements ModelProvider {
   private client: OpenAI;
   private model: string;
   private maxTokens?: number;
+  private openRouter: boolean;
 
-  constructor(
-    model: string,
-    options?: { apiKey?: string; baseURL?: string; maxTokens?: number }
-  ) {
+  constructor(model: string, options?: OpenAIProviderOptions) {
     this.client = new OpenAI({
       apiKey: options?.apiKey ?? process.env.OPENAI_API_KEY ?? "not-needed",
       baseURL: options?.baseURL,
     });
     this.model = model;
     this.maxTokens = options?.maxTokens;
+    this.openRouter = options?.openRouter ?? false;
   }
 
   async chat(params: ChatParams): Promise<ModelResponse> {
@@ -43,12 +66,16 @@ export class OpenAIProvider implements ModelProvider {
     );
     const tools = params.tools.map((t) => this.toOpenAITool(t));
 
-    const response = await this.client.chat.completions.create({
-      model: this.model,
-      messages,
-      tools: tools.length > 0 ? tools : undefined,
-      max_tokens: this.maxTokens,
-    });
+    const request = this.withOpenRouterSessionId(
+      {
+        model: this.model,
+        messages,
+        tools: tools.length > 0 ? tools : undefined,
+        max_tokens: this.maxTokens,
+      },
+      params
+    );
+    const response = await this.client.chat.completions.create(request);
 
     const choice = response.choices[0];
     if (!choice) {
@@ -64,10 +91,7 @@ export class OpenAIProvider implements ModelProvider {
       content,
       reasoning: this.extractReasoning(choice.message),
       usage: response.usage
-        ? {
-            inputTokens: response.usage.prompt_tokens,
-            outputTokens: response.usage.completion_tokens,
-          }
+        ? this.mapUsage(response.usage as OpenAIUsageWithCacheDetails)
         : undefined,
     };
   }
@@ -79,14 +103,17 @@ export class OpenAIProvider implements ModelProvider {
     );
     const tools = params.tools.map((t) => this.toOpenAITool(t));
 
-    const streamParams: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
-      model: this.model,
-      messages,
-      tools: tools.length > 0 ? tools : undefined,
-      max_tokens: this.maxTokens,
-      stream: true,
-      stream_options: { include_usage: true },
-    };
+    const streamParams = this.withOpenRouterSessionId(
+      {
+        model: this.model,
+        messages,
+        tools: tools.length > 0 ? tools : undefined,
+        max_tokens: this.maxTokens,
+        stream: true,
+        stream_options: { include_usage: true },
+      },
+      params
+    );
     const stream = await this.createChatCompletionStream(streamParams);
 
     let text = "";
@@ -100,10 +127,7 @@ export class OpenAIProvider implements ModelProvider {
 
     for await (const chunk of stream) {
       if (chunk.usage) {
-        usage = {
-          inputTokens: chunk.usage.prompt_tokens,
-          outputTokens: chunk.usage.completion_tokens,
-        };
+        usage = this.mapUsage(chunk.usage as OpenAIUsageWithCacheDetails);
       }
 
       const choice = chunk.choices[0];
@@ -170,8 +194,41 @@ export class OpenAIProvider implements ModelProvider {
     };
   }
 
+  private withOpenRouterSessionId<
+    T extends
+      | ChatCompletionRequestWithOpenRouterFields
+      | ChatCompletionStreamRequestWithOpenRouterFields,
+  >(
+    request: T,
+    params: ChatParams
+  ): T {
+    if (!this.openRouter || !params.sessionId) return request;
+    if (params.sessionId.length > 256) {
+      throw new Error("OpenRouter session_id must be at most 256 characters.");
+    }
+    return { ...request, session_id: params.sessionId };
+  }
+
+  private mapUsage(usage: OpenAIUsageWithCacheDetails): ModelResponse["usage"] {
+    const result: NonNullable<ModelResponse["usage"]> = {
+      inputTokens: usage.prompt_tokens,
+      outputTokens: usage.completion_tokens,
+    };
+    const cachedTokens = usage.prompt_tokens_details?.cached_tokens;
+    const cacheWriteTokens = usage.prompt_tokens_details?.cache_write_tokens;
+
+    if (typeof cachedTokens === "number") {
+      result.cachedTokens = cachedTokens;
+    }
+    if (typeof cacheWriteTokens === "number") {
+      result.cacheWriteTokens = cacheWriteTokens;
+    }
+
+    return result;
+  }
+
   private async createChatCompletionStream(
-    params: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming
+    params: ChatCompletionStreamRequestWithOpenRouterFields
   ) {
     try {
       return await this.client.chat.completions.create(params);

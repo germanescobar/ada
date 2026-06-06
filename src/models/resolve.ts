@@ -126,6 +126,7 @@ export type ProviderConfig =
     apiKey?: string;
     baseURL?: string;
     maxTokens?: number;
+    openRouter?: boolean;
   };
 
 export function parseModelString(modelString: string): ResolvedModel {
@@ -282,6 +283,7 @@ export function resolveProviderConfig(modelString: string): ProviderConfig {
         contextWindowTokens,
         apiKey: process.env.OPENROUTER_API_KEY,
         baseURL: OPENROUTER_BASE_URL,
+        openRouter: true,
       };
 
     default:
@@ -298,5 +300,6 @@ export function createProvider(modelString: string): ModelProvider {
     apiKey: config.apiKey,
     baseURL: config.baseURL,
     maxTokens: config.maxTokens,
+    openRouter: config.openRouter,
   });
 }

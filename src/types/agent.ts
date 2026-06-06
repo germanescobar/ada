@@ -45,4 +45,6 @@ export interface ModelResponse {
 export interface ModelUsage {
   inputTokens: number;
   outputTokens: number;
+  cachedTokens?: number;
+  cacheWriteTokens?: number;
 }
