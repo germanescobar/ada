@@ -5,6 +5,7 @@ import type { ModelResponse } from "../types/agent.js";
 
 export interface ChatParams {
   systemPrompt: string;
+  sessionId?: string;
   conversationItems: ConversationItem[];
   messages?: Message[];
   tools: ToolSchema[];

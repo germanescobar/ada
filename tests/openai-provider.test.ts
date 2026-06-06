@@ -10,6 +10,12 @@ type StreamingParams =
 type NonStreamingParams =
   OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming;
 type ChatCompletionChunk = OpenAI.Chat.Completions.ChatCompletionChunk;
+type UsageWithCacheDetails = OpenAI.Completions.CompletionUsage & {
+  prompt_tokens_details?: {
+    cached_tokens?: number;
+    cache_write_tokens?: number;
+  };
+};
 
 interface FakeOpenAIClient {
   chat: {
@@ -58,14 +64,14 @@ function createTextChunk(text: string): ChatCompletionChunk {
   };
 }
 
-function createUsageChunk(): ChatCompletionChunk {
+function createUsageChunk(usage?: UsageWithCacheDetails): ChatCompletionChunk {
   return {
     id: "chunk-usage",
     created: 1,
     model: "test-model",
     object: "chat.completion.chunk",
     choices: [],
-    usage: {
+    usage: usage ?? {
       prompt_tokens: 12,
       completion_tokens: 4,
       total_tokens: 16,
@@ -73,12 +79,15 @@ function createUsageChunk(): ChatCompletionChunk {
   };
 }
 
-function createCompletion(): OpenAI.Chat.Completions.ChatCompletion {
+function createCompletion(
+  usage?: UsageWithCacheDetails
+): OpenAI.Chat.Completions.ChatCompletion {
   return {
     id: "completion-1",
     created: 1,
     model: "test-model",
     object: "chat.completion",
+    usage,
     choices: [
       {
         index: 0,
@@ -120,6 +129,89 @@ test("OpenAIProvider.chat sends configured max_tokens", async () => {
   await provider.chat(createParams());
 
   assert.equal(calls[0]?.max_tokens, 8192);
+});
+
+test("OpenAIProvider.chat sends session_id only when configured for OpenRouter", async () => {
+  const openRouterProvider = new OpenAIProvider("test-model", {
+    openRouter: true,
+  });
+  const genericProvider = new OpenAIProvider("test-model");
+  const calls: NonStreamingParams[] = [];
+  const client: FakeOpenAIClient = {
+    chat: {
+      completions: {
+        async create(params: StreamingParams | NonStreamingParams) {
+          calls.push(params as NonStreamingParams);
+          return createCompletion();
+        },
+      },
+    },
+  };
+
+  setClient(openRouterProvider, client);
+  setClient(genericProvider, client);
+
+  await openRouterProvider.chat({
+    ...createParams(),
+    sessionId: "session-123",
+  });
+  await genericProvider.chat({
+    ...createParams(),
+    sessionId: "session-123",
+  });
+
+  assert.equal(
+    (calls[0] as NonStreamingParams & { session_id?: string }).session_id,
+    "session-123"
+  );
+  assert.equal(
+    (calls[1] as NonStreamingParams & { session_id?: string }).session_id,
+    undefined
+  );
+});
+
+test("OpenAIProvider.chat rejects OpenRouter session_id longer than 256 characters", async () => {
+  const provider = new OpenAIProvider("test-model", { openRouter: true });
+
+  await assert.rejects(
+    () =>
+      provider.chat({
+        ...createParams(),
+        sessionId: "a".repeat(257),
+      }),
+    /OpenRouter session_id must be at most 256 characters/
+  );
+});
+
+test("OpenAIProvider.chat preserves cache usage details", async () => {
+  const provider = new OpenAIProvider("test-model");
+
+  setClient(provider, {
+    chat: {
+      completions: {
+        async create() {
+          return createCompletion({
+            prompt_tokens: 120,
+            completion_tokens: 30,
+            total_tokens: 150,
+            prompt_tokens_details: {
+              cached_tokens: 100,
+              cache_write_tokens: 20,
+            },
+          });
+        },
+      },
+    },
+  });
+
+  const response = await provider.chat(createParams());
+
+  assert.deepEqual(response.usage, {
+    inputTokens: 120,
+    outputTokens: 30,
+    cachedTokens: 100,
+    cacheWriteTokens: 20,
+  });
 });
 
 test("OpenAIProvider.chat sends image and PDF attachments as multimodal parts", async () => {
@@ -200,7 +292,10 @@ test("OpenAIProvider.chat sends image and PDF attachments as multimodal parts", 
 
 
 test("OpenAIProvider.streamChat requests and preserves stream usage", async () => {
-  const provider = new OpenAIProvider("test-model", { maxTokens: 8192 });
+  const provider = new OpenAIProvider("test-model", {
+    maxTokens: 8192,
+    openRouter: true,
+  });
   const calls: StreamingParams[] = [];
 
   setClient(provider, {
@@ -208,14 +303,28 @@ test("OpenAIProvider.streamChat requests and preserves stream usage", async () =
       completions: {
         async create(params: StreamingParams | NonStreamingParams) {
           calls.push(params as StreamingParams);
-          return streamChunks([createTextChunk("Hello"), createUsageChunk()]);
+          return streamChunks([
+            createTextChunk("Hello"),
+            createUsageChunk({
+              prompt_tokens: 12,
+              completion_tokens: 4,
+              total_tokens: 16,
+              prompt_tokens_details: {
+                cached_tokens: 8,
+                cache_write_tokens: 2,
+              },
+            }),
+          ]);
         },
       },
     },
   });
 
   const events = [];
-  for await (const event of provider.streamChat(createParams())) {
+  for await (const event of provider.streamChat({
+    ...createParams(),
+    sessionId: "stream-session",
+  })) {
     events.push(event);
   }
 
@@ -223,13 +332,22 @@ test("OpenAIProvider.streamChat requests and preserves stream usage", async () =
     { include_usage: true },
   ]);
   assert.deepEqual(calls.map((call) => call.max_tokens), [8192]);
+  assert.equal(
+    (calls[0] as StreamingParams & { session_id?: string }).session_id,
+    "stream-session"
+  );
   assert.deepEqual(events.at(-1), {
     type: "response",
     response: {
       stopReason: "end_turn",
       content: [{ type: "text", text: "Hello" }],
       reasoning: undefined,
-      usage: { inputTokens: 12, outputTokens: 4 },
+      usage: {
+        inputTokens: 12,
+        outputTokens: 4,
+        cachedTokens: 8,
+        cacheWriteTokens: 2,
+      },
     },
   });
 });

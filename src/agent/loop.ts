@@ -114,6 +114,7 @@ export class AgentLoop {
         );
         const response = await this.getModelResponse({
           systemPrompt,
+          sessionId: session.id,
           conversationItems,
           messages: conversationItemsToMessages(conversationItems),
           tools,
