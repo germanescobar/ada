@@ -2,8 +2,22 @@ import OpenAI from "openai";
 import type { ChatParams, ModelProvider, ModelStreamEvent } from "./provider.js";
 import type { ModelResponse, StopReason } from "../types/agent.js";
 import { conversationItemsToMessages } from "../types/conversation.js";
-import type { Message, ContentBlock } from "../types/messages.js";
+import type {
+  AttachmentContentBlock,
+  ContentBlock,
+  Message,
+} from "../types/messages.js";
 import type { ToolSchema } from "../types/tools.js";
+
+type OpenAIUserContentPart =
+  | OpenAI.Chat.Completions.ChatCompletionContentPart
+  | {
+      type: "file";
+      file: {
+        filename: string;
+        file_data: string;
+      };
+    };
 
 export class OpenAIProvider implements ModelProvider {
   private client: OpenAI;
@@ -217,9 +231,11 @@ export class OpenAIProvider implements ModelProvider {
           tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
         });
       } else {
-        // User messages may contain tool_result blocks
+        // User messages may contain tool_result and attachment blocks.
         const toolResults = msg.content.filter((b) => b.type === "tool_result");
-        const textParts = msg.content.filter((b) => b.type === "text");
+        const contentParts = msg.content.filter(
+          (b) => b.type === "text" || b.type === "image" || b.type === "file"
+        );
 
         for (const block of toolResults) {
           const tr = block as { type: "tool_result"; toolUseId: string; content: string; isError?: boolean };
@@ -230,12 +246,10 @@ export class OpenAIProvider implements ModelProvider {
           });
         }
 
-        if (textParts.length > 0) {
+        if (contentParts.length > 0) {
           result.push({
             role: "user",
-            content: textParts
-              .map((b) => (b as { type: "text"; text: string }).text)
-              .join("\n"),
+            content: this.toOpenAIUserContent(contentParts),
           });
         }
       }
@@ -255,6 +269,43 @@ export class OpenAIProvider implements ModelProvider {
         parameters: tool.parameters,
       },
     };
+  }
+
+  private toOpenAIUserContent(
+    blocks: Array<
+      { type: "text"; text: string } | AttachmentContentBlock
+    >
+  ): string | OpenAIUserContentPart[] {
+    if (blocks.every((block) => block.type === "text")) {
+      return blocks.map((block) => block.text).join("\n");
+    }
+
+    return blocks.map((block): OpenAIUserContentPart => {
+      switch (block.type) {
+        case "text":
+          return { type: "text", text: block.text };
+        case "image":
+          return {
+            type: "image_url",
+            image_url: {
+              url: this.attachmentUrl(block),
+            },
+          };
+        case "file":
+          return {
+            type: "file",
+            file: {
+              filename: block.name,
+              file_data: this.attachmentUrl(block),
+            },
+          };
+      }
+    });
+  }
+
+  private attachmentUrl(block: AttachmentContentBlock): string {
+    if (block.source.type === "url") return block.source.url;
+    return `data:${block.source.mediaType};base64,${block.source.data}`;
   }
 
   private fromOpenAIMessage(

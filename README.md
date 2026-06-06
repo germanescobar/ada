@@ -103,6 +103,7 @@ ada models
 ```
 
 Each listed value is a `provider/model` string that can be passed to `--model`. Local Ollama models use the `ollama/` provider, while Ollama Cloud models use `ollama-cloud/`.
+Models that support attachments are annotated with `[images]`, `[files]`, or both.
 
 ### Custom Model
 
@@ -111,6 +112,15 @@ Use a different AI model:
 ```bash
 ada chat "Your message here" --model ollama/glm-4.7-flash:latest
 ```
+
+Attach an image or PDF to models that support the relevant attachment type:
+
+```bash
+ada chat "Explain this screenshot" --model openrouter/moonshotai/kimi-k2.6 --attach ./screen.png
+ada chat "Summarize this brief" --model openrouter/z-ai/glm-5.1 --attach ./brief.pdf
+```
+
+`--attach` accepts local paths or HTTP(S) URLs and can be repeated. Supported local attachment types are `png`, `jpg`, `jpeg`, `webp`, `gif`, and `pdf`.
 
 ### AGENTS.md Instructions
 

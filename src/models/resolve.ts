@@ -39,6 +39,16 @@ export interface ModelOption {
   value: string;
   group: ModelOptionGroupName;
   contextWindowTokens: number;
+  capabilities?: ModelCapabilities;
+}
+
+export interface ModelCapabilities {
+  attachments?: AttachmentCapabilities;
+}
+
+export interface AttachmentCapabilities {
+  images: boolean;
+  files: boolean;
 }
 
 export const MODEL_OPTIONS: readonly ModelOption[] = [
@@ -53,24 +63,30 @@ export const MODEL_OPTIONS: readonly ModelOption[] = [
     value: "openrouter/z-ai/glm-5.1",
     group: "OpenRouter",
     contextWindowTokens: GLM_CONTEXT_WINDOW_TOKENS,
+    capabilities: { attachments: { images: false, files: true } },
   },
   {
     label: "DeepSeek V4 Pro (OpenRouter)",
     value: "openrouter/deepseek/deepseek-v4-pro",
     group: "OpenRouter",
     contextWindowTokens: DEEPSEEK_V4_PRO_CONTEXT_WINDOW_TOKENS,
+    capabilities: { attachments: { images: false, files: true } },
   },
   {
     label: "Kimi K2.6 (OpenRouter)",
     value: "openrouter/moonshotai/kimi-k2.6",
     group: "OpenRouter",
     contextWindowTokens: KIMI_K2_CONTEXT_WINDOW_TOKENS,
+    capabilities: { attachments: { images: true, files: true } },
   },
   ...OLLAMA_CLOUD_MODELS.map((model): ModelOption => ({
     label: `${model} (cloud)`,
     value: `ollama-cloud/${model}`,
     group: "Ollama Cloud",
     contextWindowTokens: OLLAMA_CLOUD_CONTEXT_WINDOWS[model],
+    ...(model === "kimi-k2.6"
+      ? { capabilities: { attachments: { images: true, files: false } } }
+      : {}),
   })),
 ];
 
@@ -197,6 +213,17 @@ export function getModelContextWindowTokens(modelString: string): number {
     MODEL_OPTIONS.find((option) => option.value === modelString)
       ?.contextWindowTokens ?? UNKNOWN_MODEL_CONTEXT_WINDOW_TOKENS
   );
+}
+
+export function getModelCapabilities(modelString: string): ModelCapabilities {
+  const option = MODEL_OPTIONS.find((item) => item.value === modelString);
+  if (option?.capabilities) return option.capabilities;
+
+  const { provider } = parseModelString(modelString);
+  if (provider === "openrouter") {
+    return { attachments: { images: false, files: true } };
+  }
+  return {};
 }
 
 export function resolveProviderConfig(modelString: string): ProviderConfig {

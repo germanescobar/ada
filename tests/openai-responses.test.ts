@@ -299,6 +299,71 @@ test("conversationItemsToInputItems preserves empty reasoning items", () => {
   ]);
 });
 
+test("conversationItemsToInputItems emits file_url for URL-backed file attachments", () => {
+  const items = conversationItemsToInputItems([
+    {
+      type: "attachment",
+      role: "user",
+      attachment: {
+        type: "file",
+        name: "brief.pdf",
+        mediaType: "application/pdf",
+        source: {
+          type: "url",
+          url: "https://example.com/brief.pdf",
+        },
+      },
+    },
+  ]);
+
+  assert.deepEqual(items, [
+    {
+      type: "message",
+      role: "user",
+      content: [
+        {
+          type: "input_file",
+          filename: "brief.pdf",
+          file_url: "https://example.com/brief.pdf",
+        },
+      ],
+    },
+  ]);
+});
+
+test("conversationItemsToInputItems emits file_data for local file attachments", () => {
+  const items = conversationItemsToInputItems([
+    {
+      type: "attachment",
+      role: "user",
+      attachment: {
+        type: "file",
+        name: "brief.pdf",
+        mediaType: "application/pdf",
+        source: {
+          type: "data",
+          mediaType: "application/pdf",
+          data: "cGRm",
+        },
+      },
+    },
+  ]);
+
+  assert.deepEqual(items, [
+    {
+      type: "message",
+      role: "user",
+      content: [
+        {
+          type: "input_file",
+          filename: "brief.pdf",
+          file_data: "data:application/pdf;base64,cGRm",
+        },
+      ],
+    },
+  ]);
+});
+
 // ─── toFunctionTool ──────────────────────────────────────────────────────
 
 test("toFunctionTool converts a ToolSchema to a Responses API function tool", () => {

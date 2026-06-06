@@ -23,8 +23,10 @@ import {
   AgentLoop,
 } from "../agent/loop.js";
 import { SessionManager } from "../agent/session.js";
+import { loadAttachments } from "../attachments.js";
 import {
   createProvider,
+  getModelCapabilities,
   getModelOptions,
   groupModelOptions,
   MODEL_OPTIONS,
@@ -52,11 +54,24 @@ export function formatModelOptions(
   return groupModelOptions(options)
     .map((group) => {
       const lines = group.options.map(
-        (option) => `  ${option.value.padEnd(38)} ${option.label}`
+        (option) =>
+          `  ${option.value.padEnd(38)} ${option.label}${formatCapabilities(option)}`
       );
       return [group.group, ...lines].join("\n");
     })
     .join("\n\n");
+}
+
+function formatCapabilities(option: ModelOption): string {
+  const attachments = option.capabilities?.attachments;
+  if (!attachments) return "";
+
+  const supported = [
+    attachments.images ? "images" : undefined,
+    attachments.files ? "files" : undefined,
+  ].filter((item): item is string => item !== undefined);
+
+  return supported.length > 0 ? ` [${supported.join(", ")}]` : "";
 }
 
 async function createAgentsFile(filePath: string, force: boolean): Promise<void> {
@@ -156,6 +171,7 @@ export function createCLI() {
     .option("--model <model>", "Model to use (provider/model)")
     .option("--stream-json", "Emit structured JSON events to stdout")
     .option("--auto-approve", "Auto-approve tool calls (dangerous commands are still denied)")
+    .option("--attach <path-or-url>", "Attach an image or PDF to the user message (repeatable)", (val, prev: string[]) => prev.concat(val), [] as string[])
     .option("--skill <path>", "Load a skill from a file or directory (repeatable)", (val, prev: string[]) => prev.concat(val), [] as string[])
     .option("--no-skills", "Disable automatic skill discovery (explicit --skill paths still load)")
     .action(async (
@@ -165,6 +181,7 @@ export function createCLI() {
         model?: string;
         autoApprove?: boolean;
         streamJson?: boolean;
+        attach?: string[];
         skill?: string[];
         skills?: boolean;
       }
@@ -192,6 +209,11 @@ export function createCLI() {
       const explicitModel = options.model ?? (program.getOptionValueSource("model") === "cli" ? parentOpts.model : undefined);
       const modelString = options.resume ? (explicitModel ?? session.model) : model;
       const provider = createProvider(modelString);
+      const attachments = await loadAttachments(
+        options.attach ?? [],
+        getModelCapabilities(modelString),
+        cwd
+      );
 
       // Set up tools
       const registry = new ToolRegistry();
@@ -260,7 +282,7 @@ export function createCLI() {
       }
 
       try {
-        await loop.run(session, message);
+        await loop.run(session, message, attachments);
       } catch (err) {
         const errorMessage = (err as Error).message;
         if (streamJson) {

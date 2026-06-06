@@ -13,7 +13,7 @@ import {
   messagesToConversationItems,
   type ConversationItem,
 } from "../types/conversation.js";
-import type { ContentBlock } from "../types/messages.js";
+import type { AttachmentContentBlock, ContentBlock } from "../types/messages.js";
 import type { StreamEvent } from "../types/stream.js";
 import { ContextBuilder } from "./context-builder.js";
 import { Executor } from "./executor.js";
@@ -55,19 +55,42 @@ export class AgentLoop {
     private contextBudget: ContextBudgetOptions = DEFAULT_CONTEXT_BUDGET
   ) {}
 
-  async run(session: SessionState, userMessage: string): Promise<void> {
+  async run(
+    session: SessionState,
+    userMessage: string,
+    attachments: AttachmentContentBlock[] = []
+  ): Promise<void> {
     try {
       this.normalizeSession(session);
       session.conversationItems.push({
         type: "message",
         role: "user",
         content: userMessage,
+        contentFormat: attachments.length > 0 ? "block" : undefined,
       });
+      session.conversationItems.push(
+        ...attachments.map((attachment): ConversationItem => ({
+          type: "attachment",
+          role: "user",
+          attachment,
+        }))
+      );
       if (!session.title) {
         session.title = this.generateTitle(userMessage);
       }
       await this.eventStore.append(session.id, "user_message", {
         text: userMessage,
+        attachments: attachments.map((attachment) => ({
+          type: attachment.type,
+          name: attachment.name,
+          mediaType:
+            attachment.type === "file"
+              ? attachment.mediaType
+              : attachment.source.type === "data"
+                ? attachment.source.mediaType
+                : undefined,
+          sourceType: attachment.source.type,
+        })),
       });
       await this.saveSession(session);
 

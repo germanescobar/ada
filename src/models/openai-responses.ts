@@ -5,7 +5,11 @@ import {
   type ConversationItem,
   type ConversationReasoningItem,
 } from "../types/conversation.js";
-import type { ContentBlock, Message } from "../types/messages.js";
+import type {
+  AttachmentContentBlock,
+  ContentBlock,
+  Message,
+} from "../types/messages.js";
 import type { ToolSchema } from "../types/tools.js";
 
 /**
@@ -160,14 +164,17 @@ export function messagesToInputItems(
       continue;
     }
 
-    const textBlocks = msg.content.filter((b) => b.type === "text");
+    const messageContentBlocks = msg.content.filter(
+      (b) => b.type === "text" || b.type === "image" || b.type === "file"
+    );
     const toolUseBlocks = msg.content.filter((b) => b.type === "tool_use");
     const toolResultBlocks = msg.content.filter(
       (b) => b.type === "tool_result"
     );
 
-    if (textBlocks.length > 0) {
+    if (messageContentBlocks.length > 0) {
       if (msg.role === "assistant") {
+        const textBlocks = messageContentBlocks.filter((b) => b.type === "text");
         items.push({
           type: "message",
           role: "assistant",
@@ -181,10 +188,7 @@ export function messagesToInputItems(
         items.push({
           type: "message",
           role: "user",
-          content: textBlocks.map((b) => ({
-            type: "input_text" as const,
-            text: (b as { type: "text"; text: string }).text,
-          })),
+          content: messageContentBlocks.map(toResponseInputContent),
         });
       }
     }
@@ -239,6 +243,13 @@ export function conversationItemsToInputItems(
         });
         break;
       }
+      case "attachment":
+        items.push({
+          type: "message",
+          role: "user",
+          content: [toResponseInputContent(item.attachment)],
+        });
+        break;
       case "reasoning":
         if (!item.id) break;
         items.push({
@@ -282,6 +293,42 @@ export function toFunctionTool(
     description: tool.description || undefined,
     parameters: tool.parameters,
     strict: false,
+  };
+}
+
+function toResponseInputContent(
+  block: { type: "text"; text: string } | AttachmentContentBlock
+) {
+  switch (block.type) {
+    case "text":
+      return { type: "input_text" as const, text: block.text };
+    case "image":
+      return {
+        type: "input_image" as const,
+        image_url: attachmentUrl(block),
+        detail: "auto" as const,
+      };
+    case "file":
+      return {
+        type: "input_file" as const,
+        filename: block.name,
+        ...responseFileSource(block),
+      };
+  }
+}
+
+function attachmentUrl(block: AttachmentContentBlock): string {
+  if (block.source.type === "url") return block.source.url;
+  return `data:${block.source.mediaType};base64,${block.source.data}`;
+}
+
+function responseFileSource(block: Extract<AttachmentContentBlock, { type: "file" }>) {
+  if (block.source.type === "url") {
+    return { file_url: block.source.url };
+  }
+
+  return {
+    file_data: `data:${block.source.mediaType};base64,${block.source.data}`,
   };
 }
 
