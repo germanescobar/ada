@@ -312,7 +312,7 @@ function toResponseInputContent(
       return {
         type: "input_file" as const,
         filename: block.name,
-        file_data: attachmentUrl(block),
+        ...responseFileSource(block),
       };
   }
 }
@@ -320,6 +320,16 @@ function toResponseInputContent(
 function attachmentUrl(block: AttachmentContentBlock): string {
   if (block.source.type === "url") return block.source.url;
   return `data:${block.source.mediaType};base64,${block.source.data}`;
+}
+
+function responseFileSource(block: Extract<AttachmentContentBlock, { type: "file" }>) {
+  if (block.source.type === "url") {
+    return { file_url: block.source.url };
+  }
+
+  return {
+    file_data: `data:${block.source.mediaType};base64,${block.source.data}`,
+  };
 }
 
 // ─── Output conversion ────────────────────────────────────────────────
