@@ -1,8 +1,14 @@
 import type { ToolResultMetadata } from "./tools.js";
-import type { ContentBlock, Message, MessageRole } from "./messages.js";
+import type {
+  AttachmentContentBlock,
+  ContentBlock,
+  Message,
+  MessageRole,
+} from "./messages.js";
 
 export type ConversationItem =
   | ConversationMessageItem
+  | ConversationAttachmentItem
   | ConversationReasoningItem
   | ConversationFunctionCallItem
   | ConversationFunctionOutputItem
@@ -13,6 +19,12 @@ export interface ConversationMessageItem {
   role: MessageRole;
   content: string;
   contentFormat?: "string" | "block";
+}
+
+export interface ConversationAttachmentItem {
+  type: "attachment";
+  role: "user";
+  attachment: AttachmentContentBlock;
 }
 
 export interface ConversationReasoningItem {
@@ -67,6 +79,14 @@ export function messagesToConversationItems(messages: Message[]): ConversationIt
             contentFormat: "block",
           });
           break;
+        case "image":
+        case "file":
+          items.push({
+            type: "attachment",
+            role: "user",
+            attachment: block,
+          });
+          break;
         case "tool_use":
           items.push({
             type: "function_call",
@@ -111,15 +131,27 @@ export function conversationItemsToMessages(items: ConversationItem[]): Message[
   for (const item of items) {
     switch (item.type) {
       case "message":
+        if (item.contentFormat === "block") {
+          if (item.role === "assistant") {
+            flushUserBlocks();
+            pendingAssistantBlocks.push({ type: "text", text: item.content });
+          } else {
+            flushAssistantBlocks();
+            pendingUserBlocks.push({ type: "text", text: item.content });
+          }
+          break;
+        }
+
         flushAssistantBlocks();
         flushUserBlocks();
         messages.push({
           role: item.role,
-          content:
-            item.contentFormat === "block"
-              ? [{ type: "text", text: item.content }]
-              : item.content,
+          content: item.content,
         });
+        break;
+      case "attachment":
+        flushAssistantBlocks();
+        pendingUserBlocks.push(item.attachment);
         break;
       case "reasoning":
         break;
@@ -181,6 +213,14 @@ export function contentBlocksToConversationItems(
           contentFormat: "block",
         });
         break;
+      case "image":
+      case "file":
+        items.push({
+          type: "attachment",
+          role: "user",
+          attachment: block,
+        });
+        break;
       case "tool_use":
         items.push({
           type: "function_call",
@@ -212,6 +252,8 @@ export function conversationItemToText(item: ConversationItem): string {
   switch (item.type) {
     case "message":
       return item.content;
+    case "attachment":
+      return `${item.attachment.type} attachment ${formatAttachmentName(item.attachment)}`;
     case "reasoning":
       return `reasoning ${item.summary}`;
     case "function_call":
@@ -223,4 +265,12 @@ export function conversationItemToText(item: ConversationItem): string {
     case "compaction_summary":
       return item.summary;
   }
+}
+
+function formatAttachmentName(attachment: AttachmentContentBlock): string {
+  const name = attachment.name ? `${attachment.name} ` : "";
+  if (attachment.source.type === "url") {
+    return `${name}${attachment.source.url}`;
+  }
+  return `${name}${attachment.source.mediaType}`;
 }

@@ -122,6 +122,83 @@ test("OpenAIProvider.chat sends configured max_tokens", async () => {
   assert.equal(calls[0]?.max_tokens, 8192);
 });
 
+test("OpenAIProvider.chat sends image and PDF attachments as multimodal parts", async () => {
+  const provider = new OpenAIProvider("test-model");
+  const calls: NonStreamingParams[] = [];
+
+  setClient(provider, {
+    chat: {
+      completions: {
+        async create(params: StreamingParams | NonStreamingParams) {
+          calls.push(params as NonStreamingParams);
+          return createCompletion();
+        },
+      },
+    },
+  });
+
+  await provider.chat({
+    systemPrompt: "You are helpful.",
+    conversationItems: [
+      {
+        type: "message",
+        role: "user",
+        content: "Compare these.",
+        contentFormat: "block",
+      },
+      {
+        type: "attachment",
+        role: "user",
+        attachment: {
+          type: "image",
+          name: "screen.png",
+          source: {
+            type: "data",
+            mediaType: "image/png",
+            data: "aW1hZ2U=",
+          },
+        },
+      },
+      {
+        type: "attachment",
+        role: "user",
+        attachment: {
+          type: "file",
+          name: "brief.pdf",
+          mediaType: "application/pdf",
+          source: {
+            type: "data",
+            mediaType: "application/pdf",
+            data: "cGRm",
+          },
+        },
+      },
+    ],
+    tools: [],
+  });
+
+  assert.deepEqual(calls[0]?.messages[1], {
+    role: "user",
+    content: [
+      { type: "text", text: "Compare these." },
+      {
+        type: "image_url",
+        image_url: {
+          url: "data:image/png;base64,aW1hZ2U=",
+        },
+      },
+      {
+        type: "file",
+        file: {
+          filename: "brief.pdf",
+          file_data: "data:application/pdf;base64,cGRm",
+        },
+      },
+    ],
+  });
+});
+
+
 test("OpenAIProvider.streamChat requests and preserves stream usage", async () => {
   const provider = new OpenAIProvider("test-model", { maxTokens: 8192 });
   const calls: StreamingParams[] = [];

@@ -157,6 +157,11 @@ export class AnthropicProvider implements ModelProvider {
         switch (block.type) {
           case "text":
             return { type: "text" as const, text: block.text };
+          case "image":
+          case "file":
+            throw new Error(
+              "AnthropicProvider does not support Ada attachment blocks yet."
+            );
           case "tool_use":
             return {
               type: "tool_use" as const,

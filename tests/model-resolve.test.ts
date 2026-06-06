@@ -6,6 +6,7 @@ import {
   getModelOptions,
   MODEL_OPTIONS,
   OLLAMA_CLOUD_MODELS,
+  getModelCapabilities,
   getModelContextWindowTokens,
   parseModelString,
   resolveProviderConfig,
@@ -125,6 +126,25 @@ test("model context windows are available for compaction budgeting", () => {
   assert.equal(getModelContextWindowTokens("ollama-cloud/deepseek-v4-pro"), 1_000_000);
   assert.equal(getModelContextWindowTokens("ollama-cloud/kimi-k2.6"), 256_000);
   assert.equal(getModelContextWindowTokens("ollama/custom-model"), 128_000);
+});
+
+test("model capabilities expose supported attachment types", () => {
+  assert.deepEqual(
+    getModelCapabilities("openrouter/moonshotai/kimi-k2.6"),
+    {
+      attachments: {
+        images: true,
+        files: true,
+      },
+    }
+  );
+  assert.deepEqual(getModelCapabilities("openrouter/z-ai/glm-5.1"), {
+    attachments: {
+      images: false,
+      files: true,
+    },
+  });
+  assert.deepEqual(getModelCapabilities("ollama/custom-model"), {});
 });
 
 test("model options separate Ollama local and Ollama Cloud choices", () => {
