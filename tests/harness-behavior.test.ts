@@ -111,6 +111,12 @@ test("run preserves prior messages and passes deterministic tool schemas", async
   const provider: ModelProvider = {
     async chat(request) {
       requests.push(request);
+      if (request.systemPrompt.includes("rolling summary")) {
+        return {
+          stopReason: "end_turn",
+          content: [{ type: "text", text: "Summary of earlier work" }],
+        };
+      }
       return {
         stopReason: "end_turn",
         content: [{ type: "text", text: "Done" }],
@@ -197,6 +203,12 @@ test("run compacts older messages when the approximate context budget is exceede
   const provider: ModelProvider = {
     async chat(request) {
       requests.push(request);
+      if (request.systemPrompt.includes("rolling summary")) {
+        return {
+          stopReason: "end_turn",
+          content: [{ type: "text", text: "Summary of earlier work" }],
+        };
+      }
       return {
         stopReason: "end_turn",
         content: [{ type: "text", text: "Done" }],
@@ -205,26 +217,36 @@ test("run compacts older messages when the approximate context budget is exceede
   };
   const { loop, eventStore, sessionStore } = createHarness(cwd, provider, {
     contextBudget: {
-      thresholdTokens: 80,
-      preserveRecentMessages: 2,
-      summaryMaxCharacters: 2_000,
+      compactAtRatio: 0.8,
+      reservedResponseTokens: 127_900,
+      keepRecentTokens: 100,
+      minSummarizableTokens: 20,
+      targetSummaryTokens: 100,
     },
   });
 
   try {
     await silenceConsole(() => loop.run(session, "Current request"));
 
-    assert.equal(requests.length, 1);
+    assert.equal(requests.length, 2);
     assert.match(
       JSON.stringify(requests[0].messages[0].content),
+      /Earlier request/
+    );
+    assert.match(
+      JSON.stringify(requests[0].messages[0].content),
+      /Second request/
+    );
+    assert.match(
+      JSON.stringify(requests[1].messages[0].content),
       /Runtime context for the assistant/
     );
-    assert.equal(requests[0].messages[1].role, "user");
+    assert.equal(requests[1].messages[1].role, "user");
     assert.match(
-      JSON.stringify(requests[0].messages[1].content),
+      JSON.stringify(requests[1].messages[1].content),
       /Previous conversation summary/
     );
-    assert.deepEqual(requests[0].messages.slice(2, 5), [
+    assert.deepEqual(requests[1].messages.slice(2, 5), [
       preservedToolUse,
       preservedToolResult,
       { role: "user", content: "Current request" },
@@ -232,11 +254,11 @@ test("run compacts older messages when the approximate context budget is exceede
 
     const saved = await sessionStore.load(session.id);
     assert.ok(saved);
-    assert.match(
-      JSON.stringify(saved.messages[0].content),
-      /Previous conversation summary/
-    );
-    assert.deepEqual(saved.messages.slice(1, 4), [
+    assert.deepEqual(saved.messages.slice(0, 6), [
+      ...oldMessages,
+      { role: "user", content: "Current request" },
+    ]);
+    assert.deepEqual(saved.messages.slice(3, 6), [
       preservedToolUse,
       preservedToolResult,
       { role: "user", content: "Current request" },
@@ -247,7 +269,9 @@ test("run compacts older messages when the approximate context budget is exceede
     });
     assert.ok(saved.contextBudget);
     assert.equal(saved.contextBudget.thresholdTokens, 80);
-    assert.equal(saved.contextBudget.preservedRecentMessages, 2);
+    assert.equal(saved.contextBudget.keepRecentTokens, 100);
+    assert.ok((saved.contextBudget.preservedRecentTokens ?? 0) <= 100);
+    assert.match(saved.contextBudget.compactionSummary ?? "", /Summary of earlier work/);
     assert.ok(saved.contextBudget.compactedAt);
 
     const events = await eventStore.getEvents(session.id);
@@ -256,7 +280,8 @@ test("run compacts older messages when the approximate context budget is exceede
       ["user_message", "conversation_compaction", "assistant_response"]
     );
     assert.equal(events[1].data.summarizedMessages, 3);
-    assert.equal(events[1].data.preservedRecentMessages, 3);
+    assert.equal(typeof events[1].data.preservedRecentTokens, "number");
+    assert.equal(typeof events[1].data.summaryTokens, "number");
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
@@ -317,21 +342,23 @@ test("run compaction keeps parallel tool-call batches intact", async () => {
   };
   const { loop, eventStore } = createHarness(cwd, provider, {
     contextBudget: {
-      thresholdTokens: 80,
-      preserveRecentMessages: 4,
-      summaryMaxCharacters: 2_000,
+      compactAtRatio: 0.8,
+      reservedResponseTokens: 127_900,
+      keepRecentTokens: 120,
+      minSummarizableTokens: 20,
+      targetSummaryTokens: 100,
     },
   });
 
   try {
     await silenceConsole(() => loop.run(session, "Current request"));
 
-    assert.equal(requests.length, 1);
+    assert.equal(requests.length, 2);
     assert.match(
-      JSON.stringify(requests[0].messages[0]?.content),
+      JSON.stringify(requests[1].messages[0]?.content),
       /Runtime context for the assistant/
     );
-    assert.deepEqual(requests[0].messages.slice(2, 5), [
+    assert.deepEqual(requests[1].messages.slice(2, 5), [
       oldMessages[3],
       oldMessages[4],
       { role: "user", content: "Current request" },
@@ -340,24 +367,62 @@ test("run compaction keeps parallel tool-call batches intact", async () => {
     const events = await eventStore.getEvents(session.id);
     assert.equal(events[1].type, "conversation_compaction");
     assert.equal(events[1].data.summarizedMessages, 3);
-    assert.equal(events[1].data.preservedRecentMessages, 5);
+    assert.equal(typeof events[1].data.preservedRecentTokens, "number");
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
 });
 
-test("repeated compaction keeps newly summarized messages when summary is capped", async () => {
+test("run compaction skips tiny eligible prefix with telemetry reason", async () => {
   const cwd = createTempDir();
   const session = createSession(cwd, [
+    { role: "user", content: "Small old request" },
     {
-      role: "user",
-      content: [
-        {
-          type: "text",
-          text: `Previous conversation summary:\n${"old summary ".repeat(80)}`,
-        },
-      ],
+      role: "assistant",
+      content: [{ type: "text", text: "Huge recent answer " + "x".repeat(900) }],
     },
+  ]);
+  const requests: ChatParams[] = [];
+  const provider: ModelProvider = {
+    async chat(request) {
+      requests.push(request);
+      return {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "Done" }],
+      };
+    },
+  };
+  const { loop, eventStore } = createHarness(cwd, provider, {
+    contextBudget: {
+      compactAtRatio: 0.8,
+      reservedResponseTokens: 127_900,
+      keepRecentTokens: 240,
+      minSummarizableTokens: 100,
+      targetSummaryTokens: 100,
+    },
+  });
+
+  try {
+    await silenceConsole(() => loop.run(session, "Current request"));
+
+    assert.equal(requests.length, 1);
+    assert.doesNotMatch(
+      JSON.stringify(requests[0].messages),
+      /Previous conversation summary/
+    );
+
+    const events = await eventStore.getEvents(session.id);
+    assert.equal(events[1].type, "conversation_compaction");
+    assert.equal(events[1].data.summarizedMessages, 0);
+    assert.equal(events[1].data.skipReason, "eligible_prefix_too_small");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("repeated compaction folds existing summary into model-generated summary", async () => {
+  const cwd = createTempDir();
+  const session = createSession(cwd, [
     { role: "user", content: `Important new request ${"a".repeat(20)}` },
     {
       role: "assistant",
@@ -369,8 +434,34 @@ test("repeated compaction keeps newly summarized messages when summary is capped
       ],
     },
   ]);
+  session.contextBudget = {
+    approximateTokens: 0,
+    thresholdTokens: 80,
+    compactAtRatio: 0.8,
+    reservedResponseTokens: 127_970,
+    keepRecentTokens: 10,
+    minSummarizableTokens: 10,
+    targetSummaryTokens: 100,
+    compactionSummary: `Previous conversation summary:\n${"old summary ".repeat(10)}`,
+    summarizedItemCount: 0,
+  };
   const provider: ModelProvider = {
-    async chat() {
+    async chat(request) {
+      if (request.systemPrompt.includes("rolling summary")) {
+        const prompt = JSON.stringify(request.messages);
+        assert.match(prompt, /old summary/);
+        assert.match(prompt, /Important new request/);
+        assert.match(prompt, /Important new answer/);
+        return {
+          stopReason: "end_turn",
+          content: [
+            {
+              type: "text",
+              text: "Previous conversation summary:\nold summary retained\nImportant new request and answer retained",
+            },
+          ],
+        };
+      }
       return {
         stopReason: "end_turn",
         content: [{ type: "text", text: "Done" }],
@@ -379,9 +470,11 @@ test("repeated compaction keeps newly summarized messages when summary is capped
   };
   const { loop, sessionStore } = createHarness(cwd, provider, {
     contextBudget: {
-      thresholdTokens: 80,
-      preserveRecentMessages: 1,
-      summaryMaxCharacters: 220,
+      compactAtRatio: 0.8,
+      reservedResponseTokens: 127_970,
+      keepRecentTokens: 10,
+      minSummarizableTokens: 10,
+      targetSummaryTokens: 100,
     },
   });
 
@@ -390,11 +483,11 @@ test("repeated compaction keeps newly summarized messages when summary is capped
 
     const saved = await sessionStore.load(session.id);
     assert.ok(saved);
-    const summary = JSON.stringify(saved.messages[0].content);
+    const summary = saved.contextBudget?.compactionSummary ?? "";
     assert.match(summary, /Previous conversation summary/);
-    assert.match(summary, /earlier summary truncated/);
+    assert.match(summary, /old summary retained/);
     assert.match(summary, /Important new request/);
-    assert.match(summary, /Important new answer/);
+    assert.match(summary, /answer retained/);
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }

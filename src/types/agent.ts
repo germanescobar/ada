@@ -19,7 +19,15 @@ export interface SessionState {
 export interface SessionContextBudget {
   approximateTokens: number;
   thresholdTokens: number;
-  preservedRecentMessages: number;
+  compactAtRatio: number;
+  reservedResponseTokens: number;
+  keepRecentTokens: number;
+  minSummarizableTokens: number;
+  targetSummaryTokens: number;
+  preservedRecentTokens?: number;
+  summaryTokens?: number;
+  compactionSummary?: string;
+  summarizedItemCount?: number;
   compactedAt?: string;
   lastProviderUsage?: ModelUsage;
 }

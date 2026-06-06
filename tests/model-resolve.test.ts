@@ -6,6 +6,7 @@ import {
   getModelOptions,
   MODEL_OPTIONS,
   OLLAMA_CLOUD_MODELS,
+  getModelContextWindowTokens,
   parseModelString,
   type ProviderConfig,
   resolveProviderConfig,
@@ -72,6 +73,7 @@ test("ollama-cloud resolves to the OpenAI-compatible cloud endpoint", () => {
         type: "openai-compatible",
         provider: "ollama-cloud",
         model: "glm-5.1",
+        contextWindowTokens: 128_000,
         apiKey: "test-ollama-key",
         baseURL: "https://ollama.com/v1",
         maxTokens: 8192,
@@ -113,6 +115,7 @@ test("existing OpenAI-compatible providers keep their defaults", () => {
     type: "openai-compatible",
     provider: "ollama",
     model: "glm-4.7-flash:latest",
+    contextWindowTokens: 128_000,
     baseURL: "http://localhost:11434/v1",
   });
 
@@ -121,10 +124,17 @@ test("existing OpenAI-compatible providers keep their defaults", () => {
       type: "openai-compatible",
       provider: "groq",
       model: "llama-3.3-70b-versatile",
+      contextWindowTokens: 128_000,
       apiKey: "test-groq-key",
       baseURL: "https://api.groq.com/openai/v1",
     });
   });
+});
+
+test("model context windows are available for compaction budgeting", () => {
+  assert.equal(getModelContextWindowTokens("anthropic/claude-sonnet-4-6"), 200_000);
+  assert.equal(getModelContextWindowTokens("openai/gpt-4"), 8_192);
+  assert.equal(getModelContextWindowTokens("ollama/custom-model"), 128_000);
 });
 
 test("model options separate Ollama local and Ollama Cloud choices", () => {
@@ -160,11 +170,13 @@ test("discovers installed local Ollama models from the tags API", async () => {
       label: "gemma4:31b (local)",
       value: "ollama/gemma4:31b",
       group: "Ollama Local",
+      contextWindowTokens: 128_000,
     },
     {
       label: "qwen3:latest (local)",
       value: "ollama/qwen3:latest",
       group: "Ollama Local",
+      contextWindowTokens: 128_000,
     },
   ]);
 });

@@ -10,6 +10,7 @@ const GROQ_BASE_URL = "https://api.groq.com/openai/v1";
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 const OLLAMA_DISCOVERY_TIMEOUT_MS = 1_000;
 const OLLAMA_CLOUD_MAX_TOKENS = 8_192;
+const UNKNOWN_MODEL_CONTEXT_WINDOW_TOKENS = 128_000;
 
 export const OLLAMA_CLOUD_MODELS = [
   "glm-5.1",
@@ -31,6 +32,7 @@ export interface ModelOption {
   label: string;
   value: string;
   group: ModelOptionGroupName;
+  contextWindowTokens: number;
 }
 
 export const MODEL_OPTIONS: readonly ModelOption[] = [
@@ -38,37 +40,49 @@ export const MODEL_OPTIONS: readonly ModelOption[] = [
     label: "Claude Sonnet 4.6",
     value: "anthropic/claude-sonnet-4-6",
     group: "Anthropic",
+    contextWindowTokens: 200_000,
   },
-  { label: "GPT-4", value: "openai/gpt-4", group: "OpenAI" },
+  {
+    label: "GPT-4",
+    value: "openai/gpt-4",
+    group: "OpenAI",
+    contextWindowTokens: 8_192,
+  },
   {
     label: "GPT-3.5 Turbo",
     value: "openai/gpt-3.5-turbo",
     group: "OpenAI",
+    contextWindowTokens: 16_385,
   },
   {
     label: "GLM 4.7 Flash (local)",
     value: "ollama/glm-4.7-flash:latest",
     group: "Ollama Local",
+    contextWindowTokens: UNKNOWN_MODEL_CONTEXT_WINDOW_TOKENS,
   },
   {
     label: "GLM 5.1 (OpenRouter)",
     value: "openrouter/z-ai/glm-5.1",
     group: "OpenRouter",
+    contextWindowTokens: UNKNOWN_MODEL_CONTEXT_WINDOW_TOKENS,
   },
   {
     label: "DeepSeek V4 Pro (OpenRouter)",
     value: "openrouter/deepseek/deepseek-v4-pro",
     group: "OpenRouter",
+    contextWindowTokens: UNKNOWN_MODEL_CONTEXT_WINDOW_TOKENS,
   },
   {
     label: "Kimi K2.6 (OpenRouter)",
     value: "openrouter/moonshotai/kimi-k2.6",
     group: "OpenRouter",
+    contextWindowTokens: UNKNOWN_MODEL_CONTEXT_WINDOW_TOKENS,
   },
   ...OLLAMA_CLOUD_MODELS.map((model): ModelOption => ({
     label: `${model} (cloud)`,
     value: `ollama-cloud/${model}`,
     group: "Ollama Cloud",
+    contextWindowTokens: UNKNOWN_MODEL_CONTEXT_WINDOW_TOKENS,
   })),
 ];
 
@@ -92,16 +106,19 @@ export type ProviderConfig =
       type: "anthropic";
       provider: string;
       model: string;
+      contextWindowTokens: number;
     }
   | {
       type: "openai-responses";
       provider: string;
       model: string;
+      contextWindowTokens: number;
     }
   | {
       type: "openai-compatible";
       provider: string;
       model: string;
+      contextWindowTokens: number;
       apiKey?: string;
       baseURL?: string;
       maxTokens?: number;
@@ -167,6 +184,7 @@ export async function discoverLocalOllamaModelOptions(
       label: `${name} (local)`,
       value: `ollama/${name}`,
       group: "Ollama Local",
+      contextWindowTokens: UNKNOWN_MODEL_CONTEXT_WINDOW_TOKENS,
     }));
   } catch {
     return undefined;
@@ -198,18 +216,27 @@ function assertSupportedOllamaCloudModel(model: string): void {
   );
 }
 
+export function getModelContextWindowTokens(modelString: string): number {
+  return (
+    MODEL_OPTIONS.find((option) => option.value === modelString)
+      ?.contextWindowTokens ?? UNKNOWN_MODEL_CONTEXT_WINDOW_TOKENS
+  );
+}
+
 export function resolveProviderConfig(modelString: string): ProviderConfig {
   const { provider, model } = parseModelString(modelString);
+  const contextWindowTokens = getModelContextWindowTokens(modelString);
 
   switch (provider) {
     case "anthropic":
-      return { type: "anthropic", provider, model };
+      return { type: "anthropic", provider, model, contextWindowTokens };
 
     case "openai":
       return {
         type: "openai-responses",
         provider,
         model,
+        contextWindowTokens,
       };
 
     case "groq":
@@ -217,6 +244,7 @@ export function resolveProviderConfig(modelString: string): ProviderConfig {
         type: "openai-compatible",
         provider,
         model,
+        contextWindowTokens,
         apiKey: process.env.GROQ_API_KEY,
         baseURL: GROQ_BASE_URL,
       };
@@ -226,6 +254,7 @@ export function resolveProviderConfig(modelString: string): ProviderConfig {
         type: "openai-compatible",
         provider,
         model,
+        contextWindowTokens,
         baseURL: OLLAMA_BASE_URL,
       };
 
@@ -240,6 +269,7 @@ export function resolveProviderConfig(modelString: string): ProviderConfig {
         type: "openai-compatible",
         provider,
         model,
+        contextWindowTokens,
         apiKey: process.env.OLLAMA_API_KEY,
         baseURL: OLLAMA_CLOUD_BASE_URL,
         maxTokens: OLLAMA_CLOUD_MAX_TOKENS,
@@ -255,6 +285,7 @@ export function resolveProviderConfig(modelString: string): ProviderConfig {
         type: "openai-compatible",
         provider,
         model,
+        contextWindowTokens,
         apiKey: process.env.OPENROUTER_API_KEY,
         baseURL: OPENROUTER_BASE_URL,
       };

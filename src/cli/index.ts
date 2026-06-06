@@ -69,24 +69,47 @@ function parsePositiveInteger(value: string): number {
   return parsed;
 }
 
+function parseRatio(value: string): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0 || parsed >= 1) {
+    throw new InvalidArgumentError("must be greater than 0 and less than 1");
+  }
+  return parsed;
+}
+
 function buildContextBudgetOptions(options: {
-  contextThresholdTokens?: number;
-  contextPreserveMessages?: number;
+  contextCompactAtRatio?: number;
+  contextReservedResponseTokens?: number;
+  contextKeepRecentTokens?: number;
+  contextMinSummarizableTokens?: number;
+  contextTargetSummaryTokens?: number;
 }): ContextBudgetOptions | undefined {
   if (
-    options.contextThresholdTokens === undefined &&
-    options.contextPreserveMessages === undefined
+    options.contextCompactAtRatio === undefined &&
+    options.contextReservedResponseTokens === undefined &&
+    options.contextKeepRecentTokens === undefined &&
+    options.contextMinSummarizableTokens === undefined &&
+    options.contextTargetSummaryTokens === undefined
   ) {
     return undefined;
   }
 
   return {
     ...DEFAULT_CONTEXT_BUDGET,
-    thresholdTokens:
-      options.contextThresholdTokens ?? DEFAULT_CONTEXT_BUDGET.thresholdTokens,
-    preserveRecentMessages:
-      options.contextPreserveMessages ??
-      DEFAULT_CONTEXT_BUDGET.preserveRecentMessages,
+    compactAtRatio:
+      options.contextCompactAtRatio ?? DEFAULT_CONTEXT_BUDGET.compactAtRatio,
+    reservedResponseTokens:
+      options.contextReservedResponseTokens ??
+      DEFAULT_CONTEXT_BUDGET.reservedResponseTokens,
+    keepRecentTokens:
+      options.contextKeepRecentTokens ??
+      DEFAULT_CONTEXT_BUDGET.keepRecentTokens,
+    minSummarizableTokens:
+      options.contextMinSummarizableTokens ??
+      DEFAULT_CONTEXT_BUDGET.minSummarizableTokens,
+    targetSummaryTokens:
+      options.contextTargetSummaryTokens ??
+      DEFAULT_CONTEXT_BUDGET.targetSummaryTokens,
   };
 }
 
@@ -188,13 +211,28 @@ export function createCLI() {
     .option("--stream-json", "Emit structured JSON events to stdout")
     .option("--auto-approve", "Auto-approve tool calls (dangerous commands are still denied)")
     .option(
-      "--context-threshold-tokens <tokens>",
-      "Approximate token threshold before compacting session history",
+      "--context-compact-at-ratio <ratio>",
+      "Model context-window ratio at which compaction starts",
+      parseRatio
+    )
+    .option(
+      "--context-reserved-response-tokens <tokens>",
+      "Approximate output budget to reserve when computing the compaction threshold",
       parsePositiveInteger
     )
     .option(
-      "--context-preserve-messages <count>",
-      "Recent message count to keep verbatim during compaction",
+      "--context-keep-recent-tokens <tokens>",
+      "Approximate recent transcript tokens to keep verbatim during compaction",
+      parsePositiveInteger
+    )
+    .option(
+      "--context-min-summarizable-tokens <tokens>",
+      "Minimum older-prefix tokens required before compaction summarizes",
+      parsePositiveInteger
+    )
+    .option(
+      "--context-target-summary-tokens <tokens>",
+      "Approximate target size for model-generated rolling summaries",
       parsePositiveInteger
     )
     .option("--skill <path>", "Load a skill from a file or directory (repeatable)", (val, prev: string[]) => prev.concat(val), [] as string[])
@@ -206,8 +244,11 @@ export function createCLI() {
         model?: string;
         autoApprove?: boolean;
         streamJson?: boolean;
-        contextThresholdTokens?: number;
-        contextPreserveMessages?: number;
+        contextCompactAtRatio?: number;
+        contextReservedResponseTokens?: number;
+        contextKeepRecentTokens?: number;
+        contextMinSummarizableTokens?: number;
+        contextTargetSummaryTokens?: number;
         skill?: string[];
         skills?: boolean;
       }
