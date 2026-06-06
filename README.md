@@ -117,7 +117,7 @@ Attach an image or PDF to models that support the relevant attachment type:
 
 ```bash
 ada chat "Explain this screenshot" --model openrouter/moonshotai/kimi-k2.6 --attach ./screen.png
-ada chat "Summarize this brief" --model openrouter/z-ai/glm-5.1 --attach ./brief.pdf
+ada chat "Summarize this brief" --model ollama-cloud/minimax-m3 --attach ./brief.pdf
 ```
 
 `--attach` accepts local paths or HTTP(S) URLs and can be repeated. Supported local attachment types are `png`, `jpg`, `jpeg`, `webp`, `gif`, and `pdf`.
@@ -165,8 +165,7 @@ ada chat "Your message here" --model ollama-cloud/glm-5.1
 Supported Ollama Cloud models:
 
 - `ollama-cloud/glm-5.1`
-- `ollama-cloud/minimax-m2.7`
-- `ollama-cloud/minimax-m3`
+- `ollama-cloud/minimax-m3` `[images, files]`
 - `ollama-cloud/deepseek-v4-pro`
 - `ollama-cloud/kimi-k2.6`
 
@@ -291,7 +290,6 @@ Available providers (provider/model format):
 
 - `ollama/<local-model>`
 - `ollama-cloud/glm-5.1`
-- `ollama-cloud/minimax-m2.7`
 - `ollama-cloud/minimax-m3`
 - `ollama-cloud/deepseek-v4-pro`
 - `ollama-cloud/kimi-k2.6`

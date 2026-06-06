@@ -126,7 +126,6 @@ test("model context windows are available for compaction budgeting", () => {
     getModelContextWindowTokens("openrouter/moonshotai/kimi-k2.6"),
     256_000
   );
-  assert.equal(getModelContextWindowTokens("ollama-cloud/minimax-m2.7"), 200_000);
   assert.equal(getModelContextWindowTokens("ollama-cloud/minimax-m3"), 512_000);
   assert.equal(getModelContextWindowTokens("ollama-cloud/deepseek-v4-pro"), 1_000_000);
   assert.equal(getModelContextWindowTokens("ollama-cloud/kimi-k2.6"), 256_000);
@@ -149,6 +148,21 @@ test("model capabilities expose supported attachment types", () => {
       files: true,
     },
   });
+  assert.deepEqual(
+    getModelCapabilities("openrouter/minimax/minimax-m3"),
+    {
+      attachments: {
+        images: true,
+        files: true,
+      },
+    }
+  );
+  assert.deepEqual(getModelCapabilities("ollama-cloud/minimax-m3"), {
+    attachments: {
+      images: true,
+      files: true,
+    },
+  });
   assert.deepEqual(getModelCapabilities("ollama/custom-model"), {});
 });
 
@@ -167,7 +181,6 @@ test("model options separate Ollama local and Ollama Cloud choices", () => {
   );
   assert.deepEqual(cloudOptions.map((option) => option.value), [
     "ollama-cloud/glm-5.1",
-    "ollama-cloud/minimax-m2.7",
     "ollama-cloud/minimax-m3",
     "ollama-cloud/deepseek-v4-pro",
     "ollama-cloud/kimi-k2.6",
