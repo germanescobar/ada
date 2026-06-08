@@ -61,7 +61,22 @@ export class ContextBuilder {
         repositoryRoot: this.runtimeContext.agentsRepositoryRoot,
       }),
     );
-    return STATIC_SYSTEM_PROMPT + agentInstructionsSection + skillsSection;
+    return (
+      STATIC_SYSTEM_PROMPT +
+      agentInstructionsSection +
+      skillsSection +
+      this.buildEnvironmentFooter()
+    );
+  }
+
+  private buildEnvironmentFooter(): string {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    const day = String(now.getDate()).padStart(2, "0");
+    const date = `${year}-${month}-${day}`;
+    const cwd = this.workingDirectory.replace(/\\/g, "/");
+    return `\nCurrent date: ${date}\nCurrent working directory: ${cwd}`;
   }
 
   async buildDynamicContext(): Promise<string> {

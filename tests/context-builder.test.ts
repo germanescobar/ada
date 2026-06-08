@@ -17,15 +17,23 @@ function runGit(cwd: string, ...args: string[]): void {
   execFileSync("git", args, { cwd, stdio: "ignore" });
 }
 
-test("buildSystemPrompt is stable and excludes environment context", () => {
-  const first = new ContextBuilder("/tmp/first");
-  const second = new ContextBuilder("/tmp/second");
+test("buildSystemPrompt includes cwd and current date and excludes other runtime context", () => {
+  const cwd = createTempDir();
 
-  assert.equal(first.buildSystemPrompt(), second.buildSystemPrompt());
-  assert.doesNotMatch(first.buildSystemPrompt(), /Working directory:/);
-  assert.doesNotMatch(first.buildSystemPrompt(), /Git context:/);
-  assert.doesNotMatch(first.buildSystemPrompt(), /Permission policy:/);
-  assert.doesNotMatch(first.buildSystemPrompt(), /\/tmp\/first/);
+  try {
+    runGit(cwd, "init");
+    const prompt = new ContextBuilder(cwd).buildSystemPrompt();
+    const now = new Date();
+    const expectedDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+
+    assert.match(prompt, new RegExp(`Current date: ${expectedDate}`));
+    assert.match(prompt, new RegExp(`Current working directory: ${cwd.replace(/\\\\/g, "/")}`));
+    assert.doesNotMatch(prompt, /Git context:/);
+    assert.doesNotMatch(prompt, /Permission policy:/);
+    assert.doesNotMatch(prompt, /Runtime:/);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
 });
 
 test("buildSystemPrompt includes global and repository AGENTS.md instructions", () => {
