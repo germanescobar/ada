@@ -324,7 +324,7 @@ export function responseToModelResponse(
         type: "tool_use",
         id: fc.call_id,
         name: fc.name,
-        input: JSON.parse(fc.arguments) as Record<string, unknown>,
+        input: parseFunctionCallArguments(fc.arguments),
       });
     } else if (item.type === "reasoning") {
       const ri = item as OpenAI.Responses.ResponseReasoningItem;
@@ -386,4 +386,22 @@ export function mapStopReason(
     default:
       return "error";
   }
+}
+
+function parseFunctionCallArguments(
+  inputJson: string
+): Record<string, unknown> {
+  if (!inputJson) return {};
+  try {
+    const parsed = JSON.parse(inputJson);
+    return isPlainObject(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return (
+    typeof value === "object" && value !== null && !Array.isArray(value)
+  );
 }

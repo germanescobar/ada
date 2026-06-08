@@ -623,3 +623,43 @@ test("mapStopReason returns error for failed responses", () => {
 
   assert.equal(mapStopReason(response, []), "error");
 });
+
+test("responseToModelResponse normalizes non-object function_call arguments to empty input", () => {
+  const cases: Array<{ arguments: string; label: string }> = [
+    { arguments: "null", label: "JSON null" },
+    { arguments: "[]", label: "JSON array" },
+    { arguments: "", label: "empty string" },
+    { arguments: "{not valid json", label: "invalid JSON" },
+  ];
+
+  for (const { arguments: args, label } of cases) {
+    const response = makeResponse({
+      status: "completed",
+      output: [
+        {
+          type: "function_call",
+          id: "fc_1",
+          call_id: "call_abc",
+          name: "run_command",
+          arguments: args,
+        } as OpenAI.Responses.ResponseFunctionToolCall,
+      ],
+    });
+
+    const result = responseToModelResponse(response);
+
+    assert.equal(result.stopReason, "tool_use", `stopReason for ${label}`);
+    assert.deepEqual(
+      result.content,
+      [
+        {
+          type: "tool_use",
+          id: "call_abc",
+          name: "run_command",
+          input: {},
+        },
+      ],
+      `content for ${label}`
+    );
+  }
+});

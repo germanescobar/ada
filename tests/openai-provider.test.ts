@@ -194,3 +194,70 @@ test("OpenAIProvider.streamChat retries without stream_options when unsupported"
     },
   });
 });
+
+test("OpenAIProvider.chat normalizes non-object tool_call arguments to empty input", async () => {
+  const cases: Array<{ arguments: string; label: string }> = [
+    { arguments: "null", label: "JSON null" },
+    { arguments: "[]", label: "JSON array" },
+    { arguments: "", label: "empty string" },
+    { arguments: "{not valid json", label: "invalid JSON" },
+  ];
+
+  for (const { arguments: args, label } of cases) {
+    const provider = new OpenAIProvider("test-model");
+    const completion: OpenAI.Chat.Completions.ChatCompletion = {
+      id: "completion-1",
+      created: 1,
+      model: "test-model",
+      object: "chat.completion",
+      choices: [
+        {
+          index: 0,
+          finish_reason: "tool_calls",
+          logprobs: null,
+          message: {
+            role: "assistant",
+            content: null,
+            refusal: null,
+            tool_calls: [
+              {
+                id: "call_abc",
+                type: "function",
+                function: {
+                  name: "run_command",
+                  arguments: args,
+                },
+              },
+            ],
+          },
+        },
+      ],
+    };
+
+    setClient(provider, {
+      chat: {
+        completions: {
+          async create() {
+            return completion;
+          },
+        },
+      },
+    });
+
+    const result = await provider.chat(createParams());
+
+    assert.equal(result.stopReason, "tool_use", `stopReason for ${label}`);
+    assert.deepEqual(
+      result.content,
+      [
+        {
+          type: "tool_use",
+          id: "call_abc",
+          name: "run_command",
+          input: {},
+        },
+      ],
+      `content for ${label}`
+    );
+  }
+});

@@ -272,7 +272,7 @@ export class OpenAIProvider implements ModelProvider {
           type: "tool_use",
           id: call.id,
           name: call.function.name,
-          input: JSON.parse(call.function.arguments) as Record<string, unknown>,
+          input: this.parseToolArguments(call.function.arguments),
         });
       }
     }
