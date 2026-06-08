@@ -20,6 +20,28 @@ export class Executor {
     sessionId: string,
     toolCall: ToolCall
   ): Promise<ToolResult> {
+    const validationError = this.registry.validateInput(
+      toolCall.name,
+      toolCall.input
+    );
+    if (validationError) {
+      await this.eventStore.append(sessionId, "tool_call", {
+        id: toolCall.id,
+        tool: toolCall.name,
+        input: toolCall.input,
+      });
+
+      await this.eventStore.append(sessionId, "tool_result", {
+        toolCallId: toolCall.id,
+        tool: toolCall.name,
+        content: validationError.content.slice(0, 2000),
+        isError: true,
+        metadata: validationError.metadata,
+      });
+
+      return validationError;
+    }
+
     const decision = this.policyEngine.evaluate(toolCall.name, toolCall.input);
 
     await this.eventStore.append(sessionId, "policy_decision", {

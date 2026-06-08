@@ -13,6 +13,7 @@ import type { ChatParams, ModelProvider } from "../src/models/provider.js";
 import { EventStore } from "../src/storage/event-store.js";
 import { SessionStore } from "../src/storage/session-store.js";
 import { ToolRegistry } from "../src/tools/registry.js";
+import { runCommandTool } from "../src/tools/run-command.js";
 import type { ModelResponse, SessionState } from "../src/types/agent.js";
 import type { Message } from "../src/types/messages.js";
 import type { ToolDefinition } from "../src/types/tools.js";
@@ -702,6 +703,81 @@ test("unknown tool calls are logged and returned as error tool results", async (
       tool: "missing_tool",
       content: "Unknown tool: missing_tool",
       isError: true,
+    });
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("malformed run_command input returns a tool error without policy evaluation", async () => {
+  const cwd = createTempDir();
+  const session = createSession(cwd);
+  const registry = new ToolRegistry();
+  registry.register(runCommandTool);
+  const responses: ModelResponse[] = [
+    {
+      stopReason: "tool_use",
+      content: [
+        {
+          type: "tool_use",
+          id: "tool-1",
+          name: "run_command",
+          input: {},
+        },
+      ],
+    },
+    {
+      stopReason: "end_turn",
+      content: [{ type: "text", text: "I need to include a command." }],
+    },
+  ];
+  const provider: ModelProvider = {
+    async chat() {
+      const response = responses.shift();
+      assert.ok(response);
+      return response;
+    },
+  };
+  const { loop, eventStore, sessionStore } = createHarness(cwd, provider, {
+    registry,
+    policyEngine: PolicyEngine.withDefaults(),
+  });
+
+  try {
+    await silenceConsole(() => loop.run(session, "Run a command"));
+
+    const saved = await sessionStore.load(session.id);
+    assert.ok(saved);
+    assert.deepEqual(saved.messages.at(-2), {
+      role: "user",
+      content: [
+        {
+          type: "tool_result",
+          toolUseId: "tool-1",
+          content:
+            'Invalid input for tool "run_command": missing required field "command".',
+          isError: true,
+          metadata: {
+            validationErrors: ['missing required field "command".'],
+          },
+        },
+      ],
+    });
+
+    const events = await eventStore.getEvents(session.id);
+    assert.deepEqual(
+      events.map((event) => event.type),
+      ["user_message", "assistant_response", "tool_call", "tool_result", "assistant_response"]
+    );
+    assert.deepEqual(events[3].data, {
+      toolCallId: "tool-1",
+      tool: "run_command",
+      content:
+        'Invalid input for tool "run_command": missing required field "command".',
+      isError: true,
+      metadata: {
+        validationErrors: ['missing required field "command".'],
+      },
     });
   } finally {
     rmSync(cwd, { recursive: true, force: true });
