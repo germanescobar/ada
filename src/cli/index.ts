@@ -132,7 +132,7 @@ export function createCLI() {
   program
     .name("ada")
     .description("An AI coding agent")
-    .version("0.1.0")
+    .version("0.1.1")
     .option("--model <model>", "Model to use (provider/model)", DEFAULT_MODEL)
     .option("--stream-json", "Emit structured JSON events to stdout")
     .option("--auto-approve", "Auto-approve tool calls (dangerous commands are still denied)");
