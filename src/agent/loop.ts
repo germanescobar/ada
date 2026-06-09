@@ -238,6 +238,14 @@ export class AgentLoop {
             throw err;
           }
 
+          // A tool may return a cancelled result rather than throwing (e.g.
+          // run_command). Check again before persisting so the session stays
+          // at its last coherent point on cancellation.
+          if (signal?.aborted) {
+            await this.handleCancellation(session);
+            return;
+          }
+
           this.emit({
             type: "tool.result",
             id: toolUse.id,
