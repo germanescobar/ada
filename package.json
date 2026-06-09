@@ -16,7 +16,7 @@
   },
   "homepage": "https://github.com/germanescobar/ada#readme",
   "bin": {
-    "ada": "./dist/index.js"
+    "ada": "dist/index.js"
   },
   "scripts": {
     "dev": "tsx src/index.ts",
