@@ -15,15 +15,18 @@ export class AnthropicProvider implements ModelProvider {
   }
 
   async chat(params: ChatParams): Promise<ModelResponse> {
-    const response = await this.client.messages.create({
-      model: this.model,
-      max_tokens: 16384,
-      system: params.systemPrompt,
-      messages: conversationItemsToMessages(params.conversationItems).map((m) =>
-        this.toAnthropicMessage(m)
-      ),
-      tools: params.tools.map((t) => this.toAnthropicTool(t)),
-    });
+    const response = await this.client.messages.create(
+      {
+        model: this.model,
+        max_tokens: 16384,
+        system: params.systemPrompt,
+        messages: conversationItemsToMessages(params.conversationItems).map((m) =>
+          this.toAnthropicMessage(m)
+        ),
+        tools: params.tools.map((t) => this.toAnthropicTool(t)),
+      },
+      { signal: params.signal }
+    );
 
     return {
       stopReason: this.mapStopReason(response.stop_reason),
@@ -36,16 +39,19 @@ export class AnthropicProvider implements ModelProvider {
   }
 
   async *streamChat(params: ChatParams): AsyncIterable<ModelStreamEvent> {
-    const stream = await this.client.messages.create({
-      model: this.model,
-      max_tokens: 16384,
-      system: params.systemPrompt,
-      messages: conversationItemsToMessages(params.conversationItems).map((m) =>
-        this.toAnthropicMessage(m)
-      ),
-      tools: params.tools.map((t) => this.toAnthropicTool(t)),
-      stream: true,
-    });
+    const stream = await this.client.messages.create(
+      {
+        model: this.model,
+        max_tokens: 16384,
+        system: params.systemPrompt,
+        messages: conversationItemsToMessages(params.conversationItems).map((m) =>
+          this.toAnthropicMessage(m)
+        ),
+        tools: params.tools.map((t) => this.toAnthropicTool(t)),
+        stream: true,
+      },
+      { signal: params.signal }
+    );
 
     const blocks = new Map<
       number,

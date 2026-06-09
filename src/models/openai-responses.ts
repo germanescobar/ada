@@ -47,12 +47,15 @@ export class OpenAIResponsesProvider implements ModelProvider {
     const inputItems = conversationItemsToInputItems(params.conversationItems);
     const tools = params.tools.map(toFunctionTool);
 
-    const response = await this.client.responses.create({
-      model: this.model,
-      instructions: params.systemPrompt,
-      input: inputItems,
-      tools: tools.length > 0 ? tools : undefined,
-    });
+    const response = await this.client.responses.create(
+      {
+        model: this.model,
+        instructions: params.systemPrompt,
+        input: inputItems,
+        tools: tools.length > 0 ? tools : undefined,
+      },
+      { signal: params.signal }
+    );
 
     return responseToModelResponse(response);
   }
@@ -61,13 +64,16 @@ export class OpenAIResponsesProvider implements ModelProvider {
     const inputItems = conversationItemsToInputItems(params.conversationItems);
     const tools = params.tools.map(toFunctionTool);
 
-    const stream = await this.client.responses.create({
-      model: this.model,
-      instructions: params.systemPrompt,
-      input: inputItems,
-      tools: tools.length > 0 ? tools : undefined,
-      stream: true,
-    });
+    const stream = await this.client.responses.create(
+      {
+        model: this.model,
+        instructions: params.systemPrompt,
+        input: inputItems,
+        tools: tools.length > 0 ? tools : undefined,
+        stream: true,
+      },
+      { signal: params.signal }
+    );
 
     let response: OpenAI.Responses.Response | undefined;
     const toolCalls = new Map<

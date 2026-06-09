@@ -299,8 +299,25 @@ export function createCLI() {
         console.log();
       }
 
+      const abortController = new AbortController();
+      let interrupted = false;
+      const onSigint = () => {
+        if (interrupted) {
+          // A second Ctrl-C forces an immediate exit if cancellation hangs.
+          process.exit(130);
+        }
+        interrupted = true;
+        abortController.abort();
+        if (!streamJson) {
+          console.log(
+            chalk.yellow("\nCancelling run… (press Ctrl-C again to force quit)")
+          );
+        }
+      };
+      process.on("SIGINT", onSigint);
+
       try {
-        await loop.run(session, message, attachments);
+        await loop.run(session, message, attachments, abortController.signal);
       } catch (err) {
         const errorMessage = (err as Error).message;
         if (streamJson) {
@@ -316,6 +333,12 @@ export function createCLI() {
           console.error(chalk.red(`Error: ${errorMessage}`));
         }
         process.exit(1);
+      } finally {
+        process.off("SIGINT", onSigint);
+      }
+
+      if (interrupted) {
+        process.exit(130);
       }
     });
 

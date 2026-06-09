@@ -75,7 +75,9 @@ export class OpenAIProvider implements ModelProvider {
       },
       params
     );
-    const response = await this.client.chat.completions.create(request);
+    const response = await this.client.chat.completions.create(request, {
+      signal: params.signal,
+    });
 
     const choice = response.choices[0];
     if (!choice) {
@@ -114,7 +116,7 @@ export class OpenAIProvider implements ModelProvider {
       },
       params
     );
-    const stream = await this.createChatCompletionStream(streamParams);
+    const stream = await this.createChatCompletionStream(streamParams, params.signal);
 
     let text = "";
     let reasoning = "";
@@ -228,17 +230,18 @@ export class OpenAIProvider implements ModelProvider {
   }
 
   private async createChatCompletionStream(
-    params: ChatCompletionStreamRequestWithOpenRouterFields
+    params: ChatCompletionStreamRequestWithOpenRouterFields,
+    signal?: AbortSignal
   ) {
     try {
-      return await this.client.chat.completions.create(params);
+      return await this.client.chat.completions.create(params, { signal });
     } catch (err) {
       if (!this.isUnsupportedStreamOptionsError(err)) {
         throw err;
       }
 
       const { stream_options: _streamOptions, ...fallbackParams } = params;
-      return this.client.chat.completions.create(fallbackParams);
+      return this.client.chat.completions.create(fallbackParams, { signal });
     }
   }
 

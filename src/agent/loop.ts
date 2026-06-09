@@ -58,7 +58,8 @@ export class AgentLoop {
   async run(
     session: SessionState,
     userMessage: string,
-    attachments: AttachmentContentBlock[] = []
+    attachments: AttachmentContentBlock[] = [],
+    signal?: AbortSignal
   ): Promise<void> {
     try {
       this.normalizeSession(session);
@@ -108,6 +109,11 @@ export class AgentLoop {
       });
 
       for (let i = 0; i < MAX_ITERATIONS; i++) {
+        if (signal?.aborted) {
+          await this.handleCancellation(session);
+          return;
+        }
+
         const modelContextItems = await this.buildModelContextItems(session);
         const conversationItems = await this.contextBuilder.buildItemsWithDynamicContext(
           modelContextItems
@@ -118,6 +124,7 @@ export class AgentLoop {
           conversationItems,
           messages: conversationItemsToMessages(conversationItems),
           tools,
+          signal,
         });
 
         if (response.reasoning) {
@@ -175,6 +182,11 @@ export class AgentLoop {
         const resultBlocks: ContentBlock[] = [];
 
         for (let toolIndex = 0; toolIndex < toolUseBlocks.length; toolIndex++) {
+          if (signal?.aborted) {
+            await this.handleCancellation(session);
+            return;
+          }
+
           const toolUse = toolUseBlocks[toolIndex];
           this.emit({
             type: "tool.call",
@@ -185,12 +197,21 @@ export class AgentLoop {
 
           let result;
           try {
-            result = await this.executor.executeTool(session.id, {
-              id: toolUse.id,
-              name: toolUse.name,
-              input: toolUse.input,
-            });
+            result = await this.executor.executeTool(
+              session.id,
+              {
+                id: toolUse.id,
+                name: toolUse.name,
+                input: toolUse.input,
+              },
+              { signal }
+            );
           } catch (err) {
+            if (signal?.aborted || isAbortError(err)) {
+              await this.handleCancellation(session);
+              return;
+            }
+
             resultBlocks.push(
               this.createErrorToolResult(
                 toolUse,
@@ -258,6 +279,11 @@ export class AgentLoop {
         timestamp: new Date().toISOString(),
       });
     } catch (err) {
+      if (signal?.aborted || isAbortError(err)) {
+        await this.handleCancellation(session);
+        return;
+      }
+
       try {
         await this.saveSession(session);
       } catch {
@@ -272,6 +298,32 @@ export class AgentLoop {
       }
       throw err;
     }
+  }
+
+  /**
+   * Record a coherent cancellation: persist the session at its last consistent
+   * point (no partial assistant turn or tool batch is appended), log the event,
+   * and notify the stream.
+   */
+  private async handleCancellation(session: SessionState): Promise<void> {
+    try {
+      await this.saveSession(session);
+    } catch {
+      // Preserve cancellation handling even if the save fails.
+    }
+    try {
+      await this.eventStore.append(session.id, "run_cancelled", {
+        reason: "user_interrupt",
+      });
+    } catch {
+      // Preserve cancellation handling even if the append fails.
+    }
+    this.emit({
+      type: "run.cancelled",
+      sessionId: session.id,
+      reason: "user_interrupt",
+      timestamp: new Date().toISOString(),
+    });
   }
 
   private generateTitle(message: string): string {
@@ -614,6 +666,10 @@ export class AgentLoop {
       case "run.failed":
         this.finishPendingTerminalDelta();
         return;
+      case "run.cancelled":
+        this.finishPendingTerminalDelta();
+        console.log(chalk.yellow("Run cancelled."));
+        return;
       case "assistant.text.delta":
         process.stdout.write(chalk.cyan(event.text));
         this.pendingTerminalDelta = true;
@@ -656,4 +712,17 @@ export class AgentLoop {
     process.stdout.write("\n");
     this.pendingTerminalDelta = false;
   }
+}
+
+/**
+ * Detects abort errors thrown by provider SDKs or aborted child processes,
+ * which surface with varying names (AbortError, APIUserAbortError, ABORT_ERR).
+ */
+function isAbortError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  return (
+    err.name === "AbortError" ||
+    err.name === "APIUserAbortError" ||
+    (err as { code?: string }).code === "ABORT_ERR"
+  );
 }

@@ -1,6 +1,6 @@
 import { exec } from "node:child_process";
 import process from "node:process";
-import type { ToolDefinition } from "../types/tools.js";
+import type { ToolDefinition, ToolResult } from "../types/tools.js";
 
 const DEFAULT_TIMEOUT = 30_000; // 30 seconds
 const MAX_OUTPUT_CHARS = 10_000;
@@ -16,15 +16,24 @@ export const runCommandTool: ToolDefinition = {
     },
     required: ["command"],
   },
-  async execute(input) {
+  async execute(input, options) {
     const command = input.command as string;
+    const signal = options?.signal;
+
+    if (signal?.aborted) {
+      return abortedResult(command);
+    }
 
     return new Promise((resolve) => {
-      exec(command, { timeout: DEFAULT_TIMEOUT }, (error, stdout, stderr) => {
+      exec(command, { timeout: DEFAULT_TIMEOUT, signal }, (error, stdout, stderr) => {
+        const aborted = Boolean(signal?.aborted);
+        const timedOut = Boolean(error?.killed) && !aborted;
         const parts: string[] = [];
         if (stdout) parts.push(stdout);
         if (stderr) parts.push(`[stderr]\n${stderr}`);
-        if (error && error.killed) {
+        if (aborted) {
+          parts.push("[cancelled] Command was cancelled before completion");
+        } else if (timedOut) {
           parts.push(`[timeout] Command timed out after ${DEFAULT_TIMEOUT}ms`);
         } else if (error && error.signal) {
           parts.push(`[signal: ${error.signal}]`);
@@ -47,7 +56,8 @@ export const runCommandTool: ToolDefinition = {
             cwd: process.cwd(),
             exitCode: getExitCode(error),
             signal: error?.signal ?? null,
-            timedOut: Boolean(error?.killed),
+            timedOut,
+            aborted,
             truncated,
             bytes: Buffer.byteLength(rawContent, "utf-8"),
             lineCount: countLines(rawContent),
@@ -61,6 +71,29 @@ export const runCommandTool: ToolDefinition = {
     });
   },
 };
+
+function abortedResult(command: string): ToolResult {
+  const content = "[cancelled] Command was cancelled before completion";
+  return {
+    content,
+    isError: true,
+    metadata: {
+      command,
+      cwd: process.cwd(),
+      exitCode: null,
+      signal: null,
+      timedOut: false,
+      aborted: true,
+      truncated: false,
+      bytes: Buffer.byteLength(content, "utf-8"),
+      lineCount: countLines(content),
+      stdoutBytes: 0,
+      stderrBytes: 0,
+      timeoutMs: DEFAULT_TIMEOUT,
+      maxOutputChars: MAX_OUTPUT_CHARS,
+    },
+  };
+}
 
 function countLines(content: string): number {
   if (content.length === 0) return 0;
