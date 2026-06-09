@@ -18,7 +18,7 @@ import type { StreamEvent } from "../types/stream.js";
 import { ContextBuilder } from "./context-builder.js";
 import { Executor } from "./executor.js";
 
-const MAX_ITERATIONS = 50;
+const MAX_ITERATIONS = 300;
 const COMPACTION_SUMMARY_HEADER = "Previous conversation summary:";
 const COMPACTION_SUMMARIZER_SYSTEM_PROMPT = `You update a rolling summary for an AI coding agent conversation.
 
@@ -241,6 +241,12 @@ export class AgentLoop {
           ...contentBlocksToConversationItems(resultBlocks)
         );
         await this.saveSession(session);
+      }
+
+      if (status === "max_iterations") {
+        throw new Error(
+          `Agent stopped after ${MAX_ITERATIONS} iterations before producing a final response. Last stop reason: ${finalStopReason}.`
+        );
       }
 
       await this.saveSession(session);

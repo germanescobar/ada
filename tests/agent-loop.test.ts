@@ -373,6 +373,49 @@ test("run saves synthetic error tool results when tool execution throws", async 
   }
 });
 
+test("run fails when tool use never reaches a final response", async () => {
+  const cwd = createTempDir();
+  const session = createSession(cwd);
+  let callCount = 0;
+  const provider: ModelProvider = {
+    async chat() {
+      callCount += 1;
+      return {
+        stopReason: "tool_use",
+        content: [
+          {
+            type: "tool_use",
+            id: `tool-${callCount}`,
+            name: "read_file",
+            input: { path: "README.md" },
+          },
+        ],
+      };
+    },
+  };
+  const { loop, eventStore } = createLoop(
+    cwd,
+    provider,
+    async () => ({ content: "file contents" })
+  );
+
+  try {
+    await assert.rejects(
+      silenceConsole(() => loop.run(session, "Keep reading")),
+      /Agent stopped after 300 iterations before producing a final response/
+    );
+
+    const events = await eventStore.getEvents(session.id);
+    assert.equal(
+      events.some((event) => event.type === "run.completed"),
+      false
+    );
+    assert.equal(events.at(-1)?.type, "error");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test("run emits normalized stream-json model deltas before tool execution", async () => {
   const cwd = createTempDir();
   const session = createSession(cwd);
