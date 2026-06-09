@@ -27,7 +27,7 @@ test("buildSystemPrompt includes cwd and current date and excludes other runtime
     const expectedDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 
     assert.match(prompt, new RegExp(`Current date: ${expectedDate}`));
-    assert.match(prompt, new RegExp(`Current working directory: ${cwd.replace(/\\\\/g, "/")}`));
+    assert.match(prompt, new RegExp(`Current working directory: ${cwd.replace(/\\/g, "/")}`));
     assert.doesNotMatch(prompt, /Git context:/);
     assert.doesNotMatch(prompt, /Permission policy:/);
     assert.doesNotMatch(prompt, /Runtime:/);
