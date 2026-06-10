@@ -8,6 +8,7 @@ export type EventType =
   | "tool_result"
   | "policy_decision"
   | "error"
+  | "run_cancelled"
   | "session_end"
   | "session_archived"
   | "skills_loaded";

@@ -1,4 +1,4 @@
-import type { ToolCall, ToolResult } from "../types/tools.js";
+import type { ToolCall, ToolExecuteOptions, ToolResult } from "../types/tools.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { EventStore } from "../storage/event-store.js";
 import type { PolicyDecision, PolicyEngine } from "./policies.js";
@@ -18,7 +18,8 @@ export class Executor {
 
   async executeTool(
     sessionId: string,
-    toolCall: ToolCall
+    toolCall: ToolCall,
+    options?: ToolExecuteOptions
   ): Promise<ToolResult> {
     const validationError = this.registry.validateInput(
       toolCall.name,
@@ -76,7 +77,11 @@ export class Executor {
       input: toolCall.input,
     });
 
-    const result = await this.registry.execute(toolCall.name, toolCall.input);
+    const result = await this.registry.execute(
+      toolCall.name,
+      toolCall.input,
+      options
+    );
 
     await this.eventStore.append(sessionId, "tool_result", {
       toolCallId: toolCall.id,

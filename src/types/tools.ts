@@ -4,11 +4,19 @@ export interface ToolSchema {
   parameters: Record<string, unknown>; // JSON Schema
 }
 
+export interface ToolExecuteOptions {
+  /** Aborted when the surrounding agent run is cancelled. */
+  signal?: AbortSignal;
+}
+
 export interface ToolDefinition {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>; // JSON Schema
-  execute: (input: Record<string, unknown>) => Promise<ToolResult>;
+  execute: (
+    input: Record<string, unknown>,
+    options?: ToolExecuteOptions
+  ) => Promise<ToolResult>;
 }
 
 export type ToolResultMetadata =

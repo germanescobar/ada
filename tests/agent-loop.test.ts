@@ -416,6 +416,200 @@ test("run fails when tool use never reaches a final response", async () => {
   }
 });
 
+test("run records a cancellation when aborted while waiting on the model", async () => {
+  const cwd = createTempDir();
+  const session = createSession(cwd);
+  const controller = new AbortController();
+  const provider: ModelProvider = {
+    async chat(params) {
+      // Reject only once cancellation is requested while we are awaiting,
+      // simulating an in-flight provider request being aborted.
+      return new Promise<ModelResponse>((_, reject) => {
+        params.signal?.addEventListener("abort", () => {
+          const err = new Error("Request was aborted.");
+          err.name = "AbortError";
+          reject(err);
+        });
+        queueMicrotask(() => controller.abort());
+      });
+    },
+  };
+  const { loop, eventStore, sessionStore } = createLoop(cwd, provider);
+
+  try {
+    await silenceConsole(() =>
+      loop.run(session, "Do something slow", [], controller.signal)
+    );
+
+    const events = await eventStore.getEvents(session.id);
+    assert.deepEqual(
+      events.map((event) => event.type),
+      ["user_message", "run_cancelled"]
+    );
+
+    const saved = await sessionStore.load(session.id);
+    assert.ok(saved);
+    assert.deepEqual(saved.conversationItems, [
+      { type: "message", role: "user", content: "Do something slow" },
+    ]);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("run records a cancellation when aborted during a streaming response", async () => {
+  const cwd = createTempDir();
+  const session = createSession(cwd);
+  const controller = new AbortController();
+  const provider: ModelProvider = {
+    async chat() {
+      throw new Error("non-streaming chat should not be used");
+    },
+    async *streamChat(params) {
+      yield { type: "assistant_text_delta", text: "Thinking" };
+      controller.abort();
+      const err = new Error("Stream aborted.");
+      err.name = "AbortError";
+      throw err;
+    },
+  };
+  const { loop, eventStore, sessionStore } = createLoop(
+    cwd,
+    provider,
+    async () => ({ content: "unused" }),
+    true
+  );
+
+  try {
+    await captureConsole(() =>
+      loop.run(session, "Stream then cancel", [], controller.signal)
+    );
+
+    const events = await eventStore.getEvents(session.id);
+    assert.deepEqual(
+      events.map((event) => event.type),
+      ["user_message", "run_cancelled"]
+    );
+
+    const saved = await sessionStore.load(session.id);
+    assert.ok(saved);
+    assert.deepEqual(saved.conversationItems, [
+      { type: "message", role: "user", content: "Stream then cancel" },
+    ]);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("run records a cancellation when aborted before a tool executes", async () => {
+  const cwd = createTempDir();
+  const session = createSession(cwd);
+  const controller = new AbortController();
+  const provider: ModelProvider = {
+    async chat() {
+      return {
+        stopReason: "tool_use",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool-1",
+            name: "run_command",
+            input: { command: "sleep 1" },
+          },
+        ],
+      };
+    },
+  };
+  const { loop, eventStore, sessionStore } = createLoop(
+    cwd,
+    provider,
+    async () => {
+      controller.abort();
+      const err = new Error("Tool aborted.");
+      err.name = "AbortError";
+      throw err;
+    }
+  );
+
+  try {
+    await silenceConsole(() =>
+      loop.run(session, "Run a command", [], controller.signal)
+    );
+
+    const events = await eventStore.getEvents(session.id);
+    assert.deepEqual(
+      events.map((event) => event.type),
+      ["user_message", "assistant_response", "run_cancelled"]
+    );
+
+    // The partial assistant turn and tool batch are not persisted, keeping the
+    // session at its last coherent point.
+    const saved = await sessionStore.load(session.id);
+    assert.ok(saved);
+    assert.deepEqual(saved.conversationItems, [
+      { type: "message", role: "user", content: "Run a command" },
+    ]);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("run records a cancellation when a tool returns an aborted result instead of throwing", async () => {
+  const cwd = createTempDir();
+  const session = createSession(cwd);
+  const controller = new AbortController();
+  const provider: ModelProvider = {
+    async chat() {
+      return {
+        stopReason: "tool_use",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool-1",
+            name: "run_command",
+            input: { command: "sleep 1" },
+          },
+        ],
+      };
+    },
+  };
+  const { loop, eventStore, sessionStore } = createLoop(
+    cwd,
+    provider,
+    async () => {
+      // Simulate run_command returning a cancelled result (rather than throwing)
+      // after the signal is aborted.
+      controller.abort();
+      return {
+        content: "[cancelled] Command was cancelled before completion",
+        isError: true,
+        metadata: { aborted: true, timedOut: false },
+      };
+    }
+  );
+
+  try {
+    await silenceConsole(() =>
+      loop.run(session, "Run a command", [], controller.signal)
+    );
+
+    const events = await eventStore.getEvents(session.id);
+    assert.deepEqual(
+      events.map((event) => event.type),
+      ["user_message", "assistant_response", "run_cancelled"]
+    );
+
+    // The aborted tool result must not be persisted.
+    const saved = await sessionStore.load(session.id);
+    assert.ok(saved);
+    assert.deepEqual(saved.conversationItems, [
+      { type: "message", role: "user", content: "Run a command" },
+    ]);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test("run emits normalized stream-json model deltas before tool execution", async () => {
   const cwd = createTempDir();
   const session = createSession(cwd);

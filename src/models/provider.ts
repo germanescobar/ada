@@ -9,6 +9,8 @@ export interface ChatParams {
   conversationItems: ConversationItem[];
   messages?: Message[];
   tools: ToolSchema[];
+  /** Aborts the in-flight model request/stream when the run is cancelled. */
+  signal?: AbortSignal;
 }
 
 export interface ModelProvider {

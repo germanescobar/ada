@@ -1,4 +1,9 @@
-import type { ToolDefinition, ToolResult, ToolSchema } from "../types/tools.js";
+import type {
+  ToolDefinition,
+  ToolExecuteOptions,
+  ToolResult,
+  ToolSchema,
+} from "../types/tools.js";
 
 const SUPPORTED_PROPERTY_TYPES = new Set([
   "string",
@@ -32,7 +37,8 @@ export class ToolRegistry {
 
   async execute(
     name: string,
-    input: Record<string, unknown>
+    input: Record<string, unknown>,
+    options?: ToolExecuteOptions
   ): Promise<ToolResult> {
     const tool = this.tools.get(name);
     if (!tool) {
@@ -42,7 +48,7 @@ export class ToolRegistry {
     const validationError = this.validateInput(name, input);
     if (validationError) return validationError;
 
-    return tool.execute(input);
+    return tool.execute(input, options);
   }
 
   validateInput(
