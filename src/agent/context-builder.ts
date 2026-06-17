@@ -42,6 +42,7 @@ export interface RuntimeContextOptions {
   skills?: Skill[];
   agentsHomeDir?: string;
   agentsRepositoryRoot?: string;
+  systemPrompt?: string;
 }
 
 export class ContextBuilder {
@@ -64,9 +65,22 @@ export class ContextBuilder {
     return (
       STATIC_SYSTEM_PROMPT +
       agentInstructionsSection +
+      this.buildUserSystemPromptSection() +
       skillsSection +
       this.buildEnvironmentFooter()
     );
+  }
+
+  private buildUserSystemPromptSection(): string {
+    const systemPrompt = this.runtimeContext.systemPrompt?.trim();
+    if (!systemPrompt) return "";
+
+    return [
+      "\nAdditional system prompt from --system-prompt:",
+      "These instructions are subordinate to Ada's built-in safety rules, user instructions, and tool permission policy.",
+      systemPrompt,
+      "",
+    ].join("\n");
   }
 
   private buildEnvironmentFooter(): string {

@@ -134,6 +134,7 @@ export function createCLI() {
     .description("An AI coding agent")
     .version("0.1.1")
     .option("--model <model>", "Model to use (provider/model)", DEFAULT_MODEL)
+    .option("--system-prompt <prompt>", "Additional system prompt instructions")
     .option("--stream-json", "Emit structured JSON events to stdout")
     .option("--auto-approve", "Auto-approve tool calls (dangerous commands are still denied)");
 
@@ -187,6 +188,7 @@ export function createCLI() {
     .argument("<message>", "Message to send to the agent")
     .option("--resume <sessionId>", "Resume a previous session")
     .option("--model <model>", "Model to use (provider/model)")
+    .option("--system-prompt <prompt>", "Additional system prompt instructions")
     .option("--stream-json", "Emit structured JSON events to stdout")
     .option("--auto-approve", "Auto-approve tool calls (dangerous commands are still denied)")
     .option("--attach <path-or-url>", "Attach an image or PDF to the user message (repeatable)", (val, prev: string[]) => prev.concat(val), [] as string[])
@@ -197,6 +199,7 @@ export function createCLI() {
       options: {
         resume?: string;
         model?: string;
+        systemPrompt?: string;
         autoApprove?: boolean;
         streamJson?: boolean;
         attach?: string[];
@@ -206,12 +209,14 @@ export function createCLI() {
     ) => {
       const parentOpts = program.opts() as {
         model: string;
+        systemPrompt?: string;
         autoApprove?: boolean;
         streamJson?: boolean;
       };
       const model = options.model ?? parentOpts.model;
       const autoApprove = options.autoApprove ?? parentOpts.autoApprove;
       const streamJson = options.streamJson ?? parentOpts.streamJson ?? false;
+      const systemPrompt = options.systemPrompt ?? parentOpts.systemPrompt;
       const cwd = process.cwd();
       const paths = getStoragePaths(cwd);
 
@@ -277,6 +282,7 @@ export function createCLI() {
           "Prefer the working directory and its descendants unless the user explicitly asks for another path.",
         policyContext: policyEngine.describe(),
         skills,
+        systemPrompt,
       });
       const approvalFn = autoApprove ? async () => true : askApproval;
       const executor = new Executor(registry, policyEngine, eventStore, approvalFn);

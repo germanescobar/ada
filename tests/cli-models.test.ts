@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  createCLI,
   formatModelOptions,
   formatModelOptionsJson,
 } from "../src/cli/index.js";
@@ -73,4 +74,13 @@ test("formatModelOptionsJson includes the Ollama discovery failure flag", () => 
     models: [],
     ollamaDiscoveryFailed: true,
   });
+});
+
+test("CLI help exposes system prompt options", () => {
+  const program = createCLI();
+  const chatCommand = program.commands.find((command) => command.name() === "chat");
+
+  assert.ok(chatCommand);
+  assert.match(program.helpInformation(), /--system-prompt <prompt>/);
+  assert.match(chatCommand.helpInformation(), /--system-prompt <prompt>/);
 });

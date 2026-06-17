@@ -68,6 +68,44 @@ test("buildSystemPrompt includes global and repository AGENTS.md instructions", 
   }
 });
 
+test("buildSystemPrompt includes additional CLI system prompt without replacing Ada instructions", () => {
+  const cwd = createTempDir();
+
+  try {
+    const prompt = new ContextBuilder(cwd, {
+      systemPrompt: "Answer tersely.",
+    }).buildSystemPrompt();
+
+    assert.match(prompt, /You are Ada, a coding agent\./);
+    assert.match(prompt, /Additional system prompt from --system-prompt:/);
+    assert.match(
+      prompt,
+      /These instructions are subordinate to Ada's built-in safety rules, user instructions, and tool permission policy\./,
+    );
+    assert.match(prompt, /Answer tersely\./);
+    assert.ok(
+      prompt.indexOf("You are Ada, a coding agent.") <
+        prompt.indexOf("Answer tersely."),
+    );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("buildSystemPrompt omits blank CLI system prompt", () => {
+  const cwd = createTempDir();
+
+  try {
+    const prompt = new ContextBuilder(cwd, {
+      systemPrompt: "   ",
+    }).buildSystemPrompt();
+
+    assert.doesNotMatch(prompt, /Additional system prompt from --system-prompt:/);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test("buildDynamicContext includes cwd and current git context", async () => {
   const cwd = createTempDir();
 
