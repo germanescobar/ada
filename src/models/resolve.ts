@@ -9,26 +9,27 @@ const OLLAMA_DISCOVERY_TIMEOUT_MS = 1_000;
 const OLLAMA_CLOUD_MAX_TOKENS = 8_192;
 const UNKNOWN_MODEL_CONTEXT_WINDOW_TOKENS = 128_000;
 const GLM_CONTEXT_WINDOW_TOKENS = 198_000;
+const GLM_5_2_CONTEXT_WINDOW_TOKENS = 976_000;
 const DEEPSEEK_V4_PRO_CONTEXT_WINDOW_TOKENS = 1_000_000;
 const KIMI_K2_CONTEXT_WINDOW_TOKENS = 256_000;
 const MINIMAX_M3_OLLAMA_CONTEXT_WINDOW_TOKENS = 512_000;
 const MINIMAX_M3_OPENROUTER_CONTEXT_WINDOW_TOKENS = 1_000_000;
 
 export const OLLAMA_CLOUD_MODELS = [
-  "glm-5.1",
+  "glm-5.2",
   "minimax-m3",
   "deepseek-v4-pro",
-  "kimi-k2.6",
+  "kimi-k2.7-code",
 ] as const;
 
 const OLLAMA_CLOUD_CONTEXT_WINDOWS: Record<
   (typeof OLLAMA_CLOUD_MODELS)[number],
   number
 > = {
-  "glm-5.1": GLM_CONTEXT_WINDOW_TOKENS,
+  "glm-5.2": GLM_5_2_CONTEXT_WINDOW_TOKENS,
   "minimax-m3": MINIMAX_M3_OLLAMA_CONTEXT_WINDOW_TOKENS,
   "deepseek-v4-pro": DEEPSEEK_V4_PRO_CONTEXT_WINDOW_TOKENS,
-  "kimi-k2.6": KIMI_K2_CONTEXT_WINDOW_TOKENS,
+  "kimi-k2.7-code": KIMI_K2_CONTEXT_WINDOW_TOKENS,
 };
 
 export type ModelOptionGroupName =
@@ -96,7 +97,7 @@ export const MODEL_OPTIONS: readonly ModelOption[] = [
     ...(model === "minimax-m3"
       ? { capabilities: { attachments: { images: true, files: true } } }
       : {}),
-    ...(model === "kimi-k2.6"
+    ...(model === "kimi-k2.7-code"
       ? { capabilities: { attachments: { images: true, files: false } } }
       : {}),
   })),

@@ -43,15 +43,15 @@ function withEnv<T>(
 }
 
 test("parseModelString splits provider and model", () => {
-  assert.deepEqual(parseModelString("ollama-cloud/glm-5.1"), {
+  assert.deepEqual(parseModelString("ollama-cloud/glm-5.2"), {
     provider: "ollama-cloud",
-    model: "glm-5.1",
+    model: "glm-5.2",
   });
 });
 
 test("parseModelString rejects missing provider", () => {
   assert.throws(
-    () => parseModelString("glm-5.1"),
+    () => parseModelString("glm-5.2"),
     /Expected "provider\/model"/
   );
 });
@@ -62,11 +62,11 @@ test("ollama-cloud resolves to the OpenAI-compatible cloud endpoint", () => {
       OLLAMA_API_KEY: "test-ollama-key",
     },
     () => {
-      assert.deepEqual(resolveProviderConfig("ollama-cloud/glm-5.1"), {
+      assert.deepEqual(resolveProviderConfig("ollama-cloud/glm-5.2"), {
         type: "openai-compatible",
         provider: "ollama-cloud",
-        model: "glm-5.1",
-        contextWindowTokens: 198_000,
+        model: "glm-5.2",
+        contextWindowTokens: 976_000,
         apiKey: "test-ollama-key",
         baseURL: "https://ollama.com/v1",
         maxTokens: 8192,
@@ -87,6 +87,14 @@ test("ollama-cloud rejects unsupported models", () => {
   assert.throws(
     () => resolveProviderConfig("ollama-cloud/kimi-k2-thinking"),
     /Unsupported Ollama Cloud model: "kimi-k2-thinking"/
+  );
+  assert.throws(
+    () => resolveProviderConfig("ollama-cloud/glm-5.1"),
+    /Unsupported Ollama Cloud model: "glm-5\.1"/
+  );
+  assert.throws(
+    () => resolveProviderConfig("ollama-cloud/kimi-k2.6"),
+    /Unsupported Ollama Cloud model: "kimi-k2\.6"/
   );
 });
 
@@ -127,8 +135,15 @@ test("model context windows are available for compaction budgeting", () => {
     256_000
   );
   assert.equal(getModelContextWindowTokens("ollama-cloud/minimax-m3"), 512_000);
-  assert.equal(getModelContextWindowTokens("ollama-cloud/deepseek-v4-pro"), 1_000_000);
-  assert.equal(getModelContextWindowTokens("ollama-cloud/kimi-k2.6"), 256_000);
+  assert.equal(
+    getModelContextWindowTokens("ollama-cloud/deepseek-v4-pro"),
+    1_000_000
+  );
+  assert.equal(getModelContextWindowTokens("ollama-cloud/glm-5.2"), 976_000);
+  assert.equal(
+    getModelContextWindowTokens("ollama-cloud/kimi-k2.7-code"),
+    256_000
+  );
   assert.equal(getModelContextWindowTokens("ollama/custom-model"), 128_000);
 });
 
@@ -163,6 +178,12 @@ test("model capabilities expose supported attachment types", () => {
       files: true,
     },
   });
+  assert.deepEqual(getModelCapabilities("ollama-cloud/kimi-k2.7-code"), {
+    attachments: {
+      images: true,
+      files: false,
+    },
+  });
   assert.deepEqual(getModelCapabilities("ollama/custom-model"), {});
 });
 
@@ -180,10 +201,10 @@ test("model options separate Ollama local and Ollama Cloud choices", () => {
     OLLAMA_CLOUD_MODELS.map((model) => `ollama-cloud/${model}`)
   );
   assert.deepEqual(cloudOptions.map((option) => option.value), [
-    "ollama-cloud/glm-5.1",
+    "ollama-cloud/glm-5.2",
     "ollama-cloud/minimax-m3",
     "ollama-cloud/deepseek-v4-pro",
-    "ollama-cloud/kimi-k2.6",
+    "ollama-cloud/kimi-k2.7-code",
   ]);
 });
 

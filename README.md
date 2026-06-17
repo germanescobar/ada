@@ -169,15 +169,15 @@ Use a supported Ollama Cloud model with the `ollama-cloud/` provider. This is se
 
 ```bash
 export OLLAMA_API_KEY=<your-ollama-api-key>
-ada chat "Your message here" --model ollama-cloud/glm-5.1
+ada chat "Your message here" --model ollama-cloud/glm-5.2
 ```
 
 Supported Ollama Cloud models:
 
-- `ollama-cloud/glm-5.1`
+- `ollama-cloud/glm-5.2`
 - `ollama-cloud/minimax-m3` `[images, files]`
 - `ollama-cloud/deepseek-v4-pro`
-- `ollama-cloud/kimi-k2.6`
+- `ollama-cloud/kimi-k2.7-code` `[images]`
 
 Ollama Cloud requests use an explicit `max_tokens` value of 8192 so the provider leaves context room for the prompt.
 
@@ -299,10 +299,10 @@ coding-agent/
 Available providers (provider/model format):
 
 - `ollama/<local-model>`
-- `ollama-cloud/glm-5.1`
+- `ollama-cloud/glm-5.2`
 - `ollama-cloud/minimax-m3`
 - `ollama-cloud/deepseek-v4-pro`
-- `ollama-cloud/kimi-k2.6`
+- `ollama-cloud/kimi-k2.7-code`
 - `openrouter/z-ai/glm-5.1`
 - `openrouter/minimax/minimax-m3`
 - `openrouter/deepseek/deepseek-v4-pro`
