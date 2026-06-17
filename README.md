@@ -113,6 +113,16 @@ Use a different AI model:
 ada chat "Your message here" --model ollama/glm-4.7-flash:latest
 ```
 
+### Additional System Prompt
+
+Add run-specific system instructions:
+
+```bash
+ada chat "Review this module" --system-prompt "Be concise and prioritize correctness issues."
+```
+
+`--system-prompt` is additive. It does not replace Ada's built-in instructions, safety rules, user instructions, or tool permission policy.
+
 Attach an image or PDF to models that support the relevant attachment type:
 
 ```bash
