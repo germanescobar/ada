@@ -1,5 +1,6 @@
 import readline from "node:readline";
 import fs from "node:fs/promises";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import chalk from "chalk";
 import { Command } from "commander";
@@ -38,15 +39,31 @@ import { loadSkills, type Skill } from "../skills/skills.js";
 const DEFAULT_MODEL = "ollama/glm-4.7-flash:latest";
 const AGENTS_TEMPLATE = `# AGENTS.md
 
-Describe the coding guidelines, project conventions, and operational constraints Ada should follow.
+Describe the coding guidelines, project conventions, and operational constraints Anita should follow.
 `;
 
 function getStoragePaths(cwd: string) {
-  const base = path.join(cwd, ".coding-agent");
+  const base = resolveStorageBase(cwd);
   return {
     events: path.join(base, "events"),
     sessions: path.join(base, "sessions"),
   };
+}
+
+/*
+ * Resolve the session-storage directory, preferring the canonical `.anita`
+ * location. Because `.anita` may already exist for skills, presence of a
+ * `sessions/` subdirectory is used to detect real storage: fall back to the
+ * legacy `.coding-agent` directory only when it holds existing sessions.
+ */
+function resolveStorageBase(cwd: string): string {
+  const primary = path.join(cwd, ".anita");
+  if (existsSync(path.join(primary, "sessions"))) return primary;
+
+  const legacy = path.join(cwd, ".coding-agent");
+  if (existsSync(path.join(legacy, "sessions"))) return legacy;
+
+  return primary;
 }
 
 export function formatModelOptions(
@@ -130,9 +147,9 @@ export function createCLI() {
   const program = new Command();
 
   program
-    .name("ada")
+    .name("anita")
     .description("An AI coding agent")
-    .version("0.1.1")
+    .version("0.3.0")
     .option("--model <model>", "Model to use (provider/model)", DEFAULT_MODEL)
     .option("--system-prompt <prompt>", "Additional system prompt instructions")
     .option("--stream-json", "Emit structured JSON events to stdout")
@@ -166,7 +183,7 @@ export function createCLI() {
     .description("Create an AGENTS.md instruction file")
     .option(
       "--global",
-      "Create ~/.ada/AGENTS.md instead of repository AGENTS.md",
+      "Create ~/.anita/AGENTS.md instead of repository AGENTS.md",
     )
     .option("--force", "Overwrite an existing AGENTS.md")
     .action(async (options: { global?: boolean; force?: boolean }) => {

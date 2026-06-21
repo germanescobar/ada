@@ -354,8 +354,8 @@ describe("formatSkillsForPrompt", () => {
       {
         name: "pdf-processing",
         description: "Extracts text from PDFs.",
-        filePath: "/home/user/.ada/skills/pdf-processing/SKILL.md",
-        baseDir: "/home/user/.ada/skills/pdf-processing",
+        filePath: "/home/user/.anita/skills/pdf-processing/SKILL.md",
+        baseDir: "/home/user/.anita/skills/pdf-processing",
         disableModelInvocation: false,
       },
     ];
@@ -367,7 +367,7 @@ describe("formatSkillsForPrompt", () => {
     assert.ok(result.includes("<description>Extracts text from PDFs.</description>"));
     assert.ok(
       result.includes(
-        "<location>/home/user/.ada/skills/pdf-processing/SKILL.md</location>",
+        "<location>/home/user/.anita/skills/pdf-processing/SKILL.md</location>",
       ),
     );
     assert.ok(result.includes("Use the read_file tool to load a skill's file"));

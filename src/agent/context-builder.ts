@@ -13,7 +13,7 @@ import {
   loadAgentInstructions,
 } from "./agents.js";
 
-const STATIC_SYSTEM_PROMPT = `You are Ada, a coding agent.
+const STATIC_SYSTEM_PROMPT = `You are Anita, a coding agent.
 
 You have these tools available:
 - read_file: Read file contents
@@ -77,7 +77,7 @@ export class ContextBuilder {
 
     return [
       "\nAdditional system prompt from --system-prompt:",
-      "These instructions are subordinate to Ada's built-in safety rules, user instructions, and tool permission policy.",
+      "These instructions are subordinate to Anita's built-in safety rules, user instructions, and tool permission policy.",
       systemPrompt,
       "",
     ].join("\n");

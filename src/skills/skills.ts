@@ -214,7 +214,7 @@ function loadSkillFromFile(
  * Discovery rules (following the Agent Skills spec):
  * - If a directory contains SKILL.md, treat it as a skill root (no further recursion)
  * - Otherwise, recurse into subdirectories to find SKILL.md files
- * - In agent-specific directories (~/.ada/skills/, .ada/skills/), root .md files
+ * - In agent-specific directories (~/.anita/skills/, .anita/skills/), root .md files
  *   are also discovered as individual skills
  * - Skip dot-dirs, node_modules
  */
@@ -308,10 +308,28 @@ function loadSkillsFromDirInternal(
  * Load skills from all configured locations.
  *
  * Discovery order (later entries override earlier on name collision):
- * 1. User-level: ~/.ada/skills/ and ~/.agents/skills/
- * 2. Project-level: .ada/skills/ and .agents/skills/ (in cwd)
+ * 1. User-level: ~/.anita/skills/ and ~/.agents/skills/
+ * 2. Project-level: .anita/skills/ and .agents/skills/ (in cwd)
  * 3. Explicit --skill paths (additive even with --no-skills)
+ *
+ * The agent-specific directory falls back to the legacy `.ada` location when
+ * `.anita` does not exist, so existing skill setups keep working.
  */
+/*
+ * Resolve the agent-specific skills directory under `base`, preferring the
+ * canonical `.anita/skills` and falling back to the legacy `.ada/skills` when
+ * the canonical directory does not exist.
+ */
+function resolveAgentSkillsDir(base: string): string {
+  const primary = path.join(base, ".anita", "skills");
+  if (fs.existsSync(primary)) return primary;
+
+  const legacy = path.join(base, ".ada", "skills");
+  if (fs.existsSync(legacy)) return legacy;
+
+  return primary;
+}
+
 export function loadSkills(options: LoadSkillsOptions = {}): LoadSkillsResult {
   const { cwd = process.cwd(), skillPaths = [], includeDefaults = true } =
     options;
@@ -359,7 +377,7 @@ export function loadSkills(options: LoadSkillsOptions = {}): LoadSkillsResult {
     // User-level (agent-specific directory: includeRootFiles for standalone .md skills)
     addSkills(
       loadSkillsFromDirInternal(
-        path.join(homeDir, ".ada", "skills"),
+        resolveAgentSkillsDir(homeDir),
         true, // root .md files are skills in agent dir
       ),
     );
@@ -374,7 +392,7 @@ export function loadSkills(options: LoadSkillsOptions = {}): LoadSkillsResult {
     // Project-level
     addSkills(
       loadSkillsFromDirInternal(
-        path.join(cwd, ".ada", "skills"),
+        resolveAgentSkillsDir(cwd),
         true, // root .md files are skills in agent dir
       ),
     );

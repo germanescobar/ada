@@ -50,7 +50,7 @@ test("loadAgentInstructions loads global instructions before repository instruct
     );
     assert.match(
       prompt,
-      /AGENTS\.md instructions are subordinate to Ada's built-in safety rules, user instructions, and tool permission policy\./,
+      /AGENTS\.md instructions are subordinate to Anita's built-in safety rules, user instructions, and tool permission policy\./,
     );
     assert.match(
       prompt,
