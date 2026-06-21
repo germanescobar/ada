@@ -18,13 +18,13 @@ An intelligent AI-powered coding agent that helps you write, edit, and run code.
 Install from npm:
 
 ```bash
-npm install -g @germanescobar/ada
+npm install -g @germanescobar/anita
 ```
 
-That installs the `ada` command globally, so users can run:
+That installs the `anita` command globally, so users can run:
 
 ```bash
-ada chat "Create a simple React component that displays a greeting"
+anita chat "Create a simple React component that displays a greeting"
 ```
 
 ## Local Development Install
@@ -42,11 +42,11 @@ npm install
 # Build the project
 npm run build
 
-# Install the ada command globally from this checkout
+# Install the anita command globally from this checkout
 npm link
 ```
 
-After that, the `ada` command will be available in your shell.
+After that, the `anita` command will be available in your shell.
 
 `npm link` is typically a one-time setup step for a local checkout. After changing files in `src/`, run:
 
@@ -69,7 +69,7 @@ npm run start -- <command>
 Start a new conversation:
 
 ```bash
-ada chat "Create a simple React component that displays a greeting"
+anita chat "Create a simple React component that displays a greeting"
 ```
 
 ### Resume a Session
@@ -77,13 +77,13 @@ ada chat "Create a simple React component that displays a greeting"
 Continue from a previous conversation:
 
 ```bash
-ada chat "Can you explain this code?" --resume <session-id>
+anita chat "Can you explain this code?" --resume <session-id>
 ```
 
 ### List Past Sessions
 
 ```bash
-ada sessions
+anita sessions
 ```
 
 ### View Event Logs
@@ -91,7 +91,7 @@ ada sessions
 View detailed events for a specific session:
 
 ```bash
-ada events <session-id>
+anita events <session-id>
 ```
 
 ### List Supported Models
@@ -99,7 +99,7 @@ ada events <session-id>
 Show the built-in model choices grouped by provider:
 
 ```bash
-ada models
+anita models
 ```
 
 Each listed value is a `provider/model` string that can be passed to `--model`. Local Ollama models use the `ollama/` provider, while Ollama Cloud models use `ollama-cloud/`.
@@ -110,7 +110,7 @@ Models that support attachments are annotated with `[images]`, `[files]`, or bot
 Use a different AI model:
 
 ```bash
-ada chat "Your message here" --model ollama/glm-4.7-flash:latest
+anita chat "Your message here" --model ollama/glm-4.7-flash:latest
 ```
 
 ### Additional System Prompt
@@ -118,27 +118,27 @@ ada chat "Your message here" --model ollama/glm-4.7-flash:latest
 Add run-specific system instructions:
 
 ```bash
-ada chat "Review this module" --system-prompt "Be concise and prioritize correctness issues."
+anita chat "Review this module" --system-prompt "Be concise and prioritize correctness issues."
 ```
 
-`--system-prompt` is additive. It does not replace Ada's built-in instructions, safety rules, user instructions, or tool permission policy.
+`--system-prompt` is additive. It does not replace Anita's built-in instructions, safety rules, user instructions, or tool permission policy.
 
 Attach an image or PDF to models that support the relevant attachment type:
 
 ```bash
-ada chat "Explain this screenshot" --model openrouter/moonshotai/kimi-k2.6 --attach ./screen.png
-ada chat "Summarize this brief" --model ollama-cloud/minimax-m3 --attach ./brief.pdf
+anita chat "Explain this screenshot" --model openrouter/moonshotai/kimi-k2.6 --attach ./screen.png
+anita chat "Summarize this brief" --model ollama-cloud/minimax-m3 --attach ./brief.pdf
 ```
 
 `--attach` accepts local paths or HTTP(S) URLs and can be repeated. Supported local attachment types are `png`, `jpg`, `jpeg`, `webp`, `gif`, and `pdf`.
 
 ### AGENTS.md Instructions
 
-Ada automatically includes AGENTS.md guidance in the system prompt when it builds context for a chat session.
+Anita automatically includes AGENTS.md guidance in the system prompt when it builds context for a chat session.
 
 Discovery order:
 
-1. Global defaults from `~/.ada/AGENTS.md`
+1. Global defaults from `~/.anita/AGENTS.md`
 2. Repository instructions from `<repo-root>/AGENTS.md`
 
 When both files exist, repository instructions are placed after global instructions and override them when they conflict.
@@ -146,20 +146,20 @@ When both files exist, repository instructions are placed after global instructi
 Create a global instructions file:
 
 ```bash
-ada agents init --global
+anita agents init --global
 ```
 
 Create a repository instructions file at the Git repository root, or in the current directory when outside Git:
 
 ```bash
-ada agents init
+anita agents init
 ```
 
 Use `--force` with either command to overwrite an existing file.
 
 ### Context Compaction
 
-Ada tracks an approximate context budget for each session. When the model context reaches a high-water mark for the selected model's context window, Ada folds older history into a rolling summary while keeping a recent token-budgeted tail, including recent tool calls and tool results, available verbatim.
+Anita tracks an approximate context budget for each session. When the model context reaches a high-water mark for the selected model's context window, Anita folds older history into a rolling summary while keeping a recent token-budgeted tail, including recent tool calls and tool results, available verbatim.
 
 By default, compaction starts around 80% of the usable model context window after reserving response tokens, preserves roughly 24,000 recent tokens, and skips compaction when the older prefix is too small to reduce context meaningfully.
 
@@ -169,7 +169,7 @@ Use a supported Ollama Cloud model with the `ollama-cloud/` provider. This is se
 
 ```bash
 export OLLAMA_API_KEY=<your-ollama-api-key>
-ada chat "Your message here" --model ollama-cloud/glm-5.2
+anita chat "Your message here" --model ollama-cloud/glm-5.2
 ```
 
 Supported Ollama Cloud models:
@@ -186,7 +186,7 @@ Ollama Cloud requests use an explicit `max_tokens` value of 8192 so the provider
 Use `--stream-json` to emit one JSON event per line for machine-readable integrations:
 
 ```bash
-ada chat "Add a hello world script" --stream-json
+anita chat "Add a hello world script" --stream-json
 ```
 
 Example stream:
@@ -202,7 +202,7 @@ Example stream:
 
 Without `--stream-json`, the CLI uses the normal human-readable terminal output.
 
-When using an OpenAI-compatible backend that exposes reasoning traces, Ada will also store them in the `assistant_response` event payload as `reasoning` and emit an `assistant.reasoning` stream event.
+When using an OpenAI-compatible backend that exposes reasoning traces, Anita will also store them in the `assistant_response` event payload as `reasoning` and emit an `assistant.reasoning` stream event.
 
 ## Publishing
 
@@ -219,7 +219,7 @@ npm publish --access public
 After publishing, users can install it with:
 
 ```bash
-npm install -g @germanescobar/ada
+npm install -g @germanescobar/anita
 ```
 
 ## Architecture
@@ -312,15 +312,17 @@ Available providers (provider/model format):
 
 ## Configuration
 
-Session data is stored in the `.coding-agent/` directory in your working directory:
+Session data is stored in the `.anita/` directory in your working directory:
 
 ```
-.coding-agent/
+.anita/
 ├── events/          # Individual event logs
 │   └── <session-id>/
 └── sessions/        # Session metadata
     └── <session-id>
 ```
+
+For backward compatibility, Anita falls back to the legacy `.coding-agent/` directory when it contains existing sessions and `.anita/` does not.
 
 ## Development
 

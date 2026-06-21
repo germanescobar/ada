@@ -41,9 +41,9 @@ test("buildSystemPrompt includes global and repository AGENTS.md instructions", 
   const homeDir = createTempDir();
 
   try {
-    mkdirSync(path.join(homeDir, ".ada"), { recursive: true });
+    mkdirSync(path.join(homeDir, ".anita"), { recursive: true });
     writeFileSync(
-      path.join(homeDir, ".ada", "AGENTS.md"),
+      path.join(homeDir, ".anita", "AGENTS.md"),
       "Use global defaults.\n",
     );
     writeFileSync(path.join(cwd, "AGENTS.md"), "Use repository rules.\n");
@@ -68,7 +68,7 @@ test("buildSystemPrompt includes global and repository AGENTS.md instructions", 
   }
 });
 
-test("buildSystemPrompt includes additional CLI system prompt without replacing Ada instructions", () => {
+test("buildSystemPrompt includes additional CLI system prompt without replacing Anita instructions", () => {
   const cwd = createTempDir();
 
   try {
@@ -76,15 +76,15 @@ test("buildSystemPrompt includes additional CLI system prompt without replacing 
       systemPrompt: "Answer tersely.",
     }).buildSystemPrompt();
 
-    assert.match(prompt, /You are Ada, a coding agent\./);
+    assert.match(prompt, /You are Anita, a coding agent\./);
     assert.match(prompt, /Additional system prompt from --system-prompt:/);
     assert.match(
       prompt,
-      /These instructions are subordinate to Ada's built-in safety rules, user instructions, and tool permission policy\./,
+      /These instructions are subordinate to Anita's built-in safety rules, user instructions, and tool permission policy\./,
     );
     assert.match(prompt, /Answer tersely\./);
     assert.ok(
-      prompt.indexOf("You are Ada, a coding agent.") <
+      prompt.indexOf("You are Anita, a coding agent.") <
         prompt.indexOf("Answer tersely."),
     );
   } finally {

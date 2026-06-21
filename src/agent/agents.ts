@@ -18,9 +18,27 @@ export interface LoadAgentInstructionsOptions {
 }
 
 const AGENTS_FILE_NAME = "AGENTS.md";
+const CONFIG_DIR_NAME = ".anita";
+const LEGACY_CONFIG_DIR_NAME = ".ada";
 
+/* Canonical location for the global AGENTS.md. Used when writing the file. */
 export function getGlobalAgentsPath(homeDir = os.homedir()): string {
-  return path.join(homeDir, ".ada", AGENTS_FILE_NAME);
+  return path.join(homeDir, CONFIG_DIR_NAME, AGENTS_FILE_NAME);
+}
+
+/*
+ * Resolve the global AGENTS.md for reading, preferring the canonical `.anita`
+ * directory and falling back to the legacy `.ada` directory so existing
+ * configurations keep working after the rename.
+ */
+function resolveReadableGlobalAgentsPath(homeDir: string): string {
+  const primary = path.join(homeDir, CONFIG_DIR_NAME, AGENTS_FILE_NAME);
+  if (fs.existsSync(primary)) return primary;
+
+  const legacy = path.join(homeDir, LEGACY_CONFIG_DIR_NAME, AGENTS_FILE_NAME);
+  if (fs.existsSync(legacy)) return legacy;
+
+  return primary;
 }
 
 export function getProjectAgentsPath(cwd: string): string {
@@ -37,7 +55,10 @@ export function loadAgentInstructions(
   const repositoryRoot =
     options.repositoryRoot ?? findRepositoryRoot(options.cwd) ?? options.cwd;
   const candidates: Array<{ scope: AgentInstructionsScope; path: string }> = [
-    { scope: "global", path: getGlobalAgentsPath(options.homeDir) },
+    {
+      scope: "global",
+      path: resolveReadableGlobalAgentsPath(options.homeDir ?? os.homedir()),
+    },
     { scope: "repository", path: getProjectAgentsPath(repositoryRoot) },
   ];
 
@@ -71,7 +92,7 @@ export function formatAgentInstructionsForPrompt(
   const lines = [
     "",
     "Additional instructions from AGENTS.md files:",
-    "AGENTS.md instructions are subordinate to Ada's built-in safety rules, user instructions, and tool permission policy.",
+    "AGENTS.md instructions are subordinate to Anita's built-in safety rules, user instructions, and tool permission policy.",
     "Instructions from later AGENTS.md files override earlier AGENTS.md files only when they conflict with each other.",
   ];
 

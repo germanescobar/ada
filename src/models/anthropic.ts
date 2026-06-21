@@ -166,7 +166,7 @@ export class AnthropicProvider implements ModelProvider {
           case "image":
           case "file":
             throw new Error(
-              "AnthropicProvider does not support Ada attachment blocks yet."
+              "AnthropicProvider does not support Anita attachment blocks yet."
             );
           case "tool_use":
             return {
