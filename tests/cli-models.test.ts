@@ -16,12 +16,12 @@ test("formatModelOptions lists models grouped by provider", () => {
   assert.match(output, /^OpenRouter\n/m);
   assert.doesNotMatch(output, /^Anthropic\n/m);
   assert.doesNotMatch(output, /^OpenAI\n/m);
-  assert.match(output, /ollama\/glm-4\.7-flash:latest\s+GLM 4\.7 Flash \(local\)/);
-  assert.match(output, /ollama-cloud\/glm-5\.2\s+glm-5\.2 \(cloud\)/);
-  assert.match(output, /ollama-cloud\/minimax-m3\s+minimax-m3 \(cloud\) \[images, files\]/);
-  assert.match(output, /openrouter\/minimax\/minimax-m3\s+MiniMax M3 \(OpenRouter\) \[images, files\]/);
-  assert.match(output, /ollama-cloud\/deepseek-v4-pro\s+deepseek-v4-pro \(cloud\)/);
-  assert.match(output, /ollama-cloud\/kimi-k2\.7-code\s+kimi-k2\.7-code \(cloud\) \[images\]/);
+  assert.match(output, /ollama\/glm-4\.7-flash:latest\s+GLM 4\.7 Flash/);
+  assert.match(output, /ollama-cloud\/glm-5\.2\s+GLM 5\.2/);
+  assert.match(output, /ollama-cloud\/minimax-m3\s+MiniMax M3 \[images, files\]/);
+  assert.match(output, /openrouter\/minimax\/minimax-m3\s+MiniMax M3 \[images, files\]/);
+  assert.match(output, /ollama-cloud\/deepseek-v4-pro\s+DeepSeek V4 Pro/);
+  assert.match(output, /ollama-cloud\/kimi-k2\.7-code\s+Kimi K2\.7 Code \[images\]/);
   assert.doesNotMatch(output, /ollama-cloud\/glm-5\.1/);
   assert.doesNotMatch(output, /ollama-cloud\/minimax-m2\.7/);
   assert.doesNotMatch(output, /ollama-cloud\/deepseek-v3\.2/);
@@ -33,7 +33,7 @@ test("formatModelOptionsJson emits machine-readable model metadata", () => {
   const result: ModelOptionsResult = {
     options: [
       {
-        label: "Kimi K2.6 (OpenRouter)",
+        label: "Kimi K2.6",
         value: "openrouter/moonshotai/kimi-k2.6",
         group: "OpenRouter",
         contextWindowTokens: 256_000,
@@ -51,7 +51,7 @@ test("formatModelOptionsJson emits machine-readable model metadata", () => {
   assert.deepEqual(JSON.parse(formatModelOptionsJson(result)), {
     models: [
       {
-        label: "Kimi K2.6 (OpenRouter)",
+        label: "Kimi K2.6",
         value: "openrouter/moonshotai/kimi-k2.6",
         group: "OpenRouter",
         contextWindowTokens: 256_000,

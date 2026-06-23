@@ -15,22 +15,41 @@ const KIMI_K2_CONTEXT_WINDOW_TOKENS = 256_000;
 const MINIMAX_M3_OLLAMA_CONTEXT_WINDOW_TOKENS = 512_000;
 const MINIMAX_M3_OPENROUTER_CONTEXT_WINDOW_TOKENS = 1_000_000;
 
-export const OLLAMA_CLOUD_MODELS = [
-  "glm-5.2",
-  "minimax-m3",
-  "deepseek-v4-pro",
-  "kimi-k2.7-code",
-] as const;
+interface OllamaCloudModelSpec {
+  slug: string;
+  label: string;
+  contextWindowTokens: number;
+  capabilities?: ModelCapabilities;
+}
 
-const OLLAMA_CLOUD_CONTEXT_WINDOWS: Record<
-  (typeof OLLAMA_CLOUD_MODELS)[number],
-  number
-> = {
-  "glm-5.2": GLM_5_2_CONTEXT_WINDOW_TOKENS,
-  "minimax-m3": MINIMAX_M3_OLLAMA_CONTEXT_WINDOW_TOKENS,
-  "deepseek-v4-pro": DEEPSEEK_V4_PRO_CONTEXT_WINDOW_TOKENS,
-  "kimi-k2.7-code": KIMI_K2_CONTEXT_WINDOW_TOKENS,
-};
+const OLLAMA_CLOUD_MODEL_SPECS: readonly OllamaCloudModelSpec[] = [
+  {
+    slug: "glm-5.2",
+    label: "GLM 5.2",
+    contextWindowTokens: GLM_5_2_CONTEXT_WINDOW_TOKENS,
+  },
+  {
+    slug: "minimax-m3",
+    label: "MiniMax M3",
+    contextWindowTokens: MINIMAX_M3_OLLAMA_CONTEXT_WINDOW_TOKENS,
+    capabilities: { attachments: { images: true, files: true } },
+  },
+  {
+    slug: "deepseek-v4-pro",
+    label: "DeepSeek V4 Pro",
+    contextWindowTokens: DEEPSEEK_V4_PRO_CONTEXT_WINDOW_TOKENS,
+  },
+  {
+    slug: "kimi-k2.7-code",
+    label: "Kimi K2.7 Code",
+    contextWindowTokens: KIMI_K2_CONTEXT_WINDOW_TOKENS,
+    capabilities: { attachments: { images: true, files: false } },
+  },
+];
+
+export const OLLAMA_CLOUD_MODELS = OLLAMA_CLOUD_MODEL_SPECS.map(
+  (spec) => spec.slug
+);
 
 export type ModelOptionGroupName =
   | "Ollama Local"
@@ -56,50 +75,45 @@ export interface AttachmentCapabilities {
 
 export const MODEL_OPTIONS: readonly ModelOption[] = [
   {
-    label: "GLM 4.7 Flash (local)",
+    label: "GLM 4.7 Flash",
     value: "ollama/glm-4.7-flash:latest",
     group: "Ollama Local",
     contextWindowTokens: GLM_CONTEXT_WINDOW_TOKENS,
   },
   {
-    label: "GLM 5.1 (OpenRouter)",
+    label: "GLM 5.1",
     value: "openrouter/z-ai/glm-5.1",
     group: "OpenRouter",
     contextWindowTokens: GLM_CONTEXT_WINDOW_TOKENS,
     capabilities: { attachments: { images: false, files: true } },
   },
   {
-    label: "MiniMax M3 (OpenRouter)",
+    label: "MiniMax M3",
     value: "openrouter/minimax/minimax-m3",
     group: "OpenRouter",
     contextWindowTokens: MINIMAX_M3_OPENROUTER_CONTEXT_WINDOW_TOKENS,
     capabilities: { attachments: { images: true, files: true } },
   },
   {
-    label: "DeepSeek V4 Pro (OpenRouter)",
+    label: "DeepSeek V4 Pro",
     value: "openrouter/deepseek/deepseek-v4-pro",
     group: "OpenRouter",
     contextWindowTokens: DEEPSEEK_V4_PRO_CONTEXT_WINDOW_TOKENS,
     capabilities: { attachments: { images: false, files: true } },
   },
   {
-    label: "Kimi K2.6 (OpenRouter)",
+    label: "Kimi K2.6",
     value: "openrouter/moonshotai/kimi-k2.6",
     group: "OpenRouter",
     contextWindowTokens: KIMI_K2_CONTEXT_WINDOW_TOKENS,
     capabilities: { attachments: { images: true, files: true } },
   },
-  ...OLLAMA_CLOUD_MODELS.map((model): ModelOption => ({
-    label: `${model} (cloud)`,
-    value: `ollama-cloud/${model}`,
+  ...OLLAMA_CLOUD_MODEL_SPECS.map((spec): ModelOption => ({
+    label: spec.label,
+    value: `ollama-cloud/${spec.slug}`,
     group: "Ollama Cloud",
-    contextWindowTokens: OLLAMA_CLOUD_CONTEXT_WINDOWS[model],
-    ...(model === "minimax-m3"
-      ? { capabilities: { attachments: { images: true, files: true } } }
-      : {}),
-    ...(model === "kimi-k2.7-code"
-      ? { capabilities: { attachments: { images: true, files: false } } }
-      : {}),
+    contextWindowTokens: spec.contextWindowTokens,
+    ...(spec.capabilities ? { capabilities: spec.capabilities } : {}),
   })),
 ];
 
@@ -187,7 +201,7 @@ export async function discoverLocalOllamaModelOptions(
 
     const payload: unknown = await response.json();
     return parseOllamaModelNames(payload).map((name) => ({
-      label: `${name} (local)`,
+      label: name,
       value: `ollama/${name}`,
       group: "Ollama Local",
       contextWindowTokens: UNKNOWN_MODEL_CONTEXT_WINDOW_TOKENS,
