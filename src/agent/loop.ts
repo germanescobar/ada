@@ -95,10 +95,17 @@ export class AgentLoop {
       });
       await this.saveSession(session);
 
-      const systemPrompt = this.contextBuilder.buildSystemPrompt();
       const tools = this.registry.toSchemas();
+      // Build the base system prompt once per run. It loads AGENTS.md from disk,
+      // so rebuilding it each turn would let a tool that writes AGENTS.md inject
+      // freshly generated text as system instructions mid-run. Only the runtime
+      // context is refreshed per turn.
+      const baseSystemPrompt = this.contextBuilder.buildSystemPrompt();
       let finalStopReason = "max_iterations";
       let status: "completed" | "max_iterations" = "max_iterations";
+      // Track the last logged system prompt so the model_request event is only
+      // written when the assembled prompt (including runtime context) changes.
+      let lastLoggedSystemPrompt: string | undefined;
 
       this.emit({
         type: "run.started",
@@ -115,14 +122,22 @@ export class AgentLoop {
         }
 
         const modelContextItems = await this.buildModelContextItems(session);
-        const conversationItems = await this.contextBuilder.buildItemsWithDynamicContext(
-          modelContextItems
-        );
+        const systemPrompt =
+          await this.contextBuilder.appendRuntimeContext(baseSystemPrompt);
+
+        if (systemPrompt !== lastLoggedSystemPrompt) {
+          await this.eventStore.append(session.id, "model_request", {
+            systemPrompt,
+            messageCount: modelContextItems.length,
+          });
+          lastLoggedSystemPrompt = systemPrompt;
+        }
+
         const response = await this.getModelResponse({
           systemPrompt,
           sessionId: session.id,
-          conversationItems,
-          messages: conversationItemsToMessages(conversationItems),
+          conversationItems: modelContextItems,
+          messages: conversationItemsToMessages(modelContextItems),
           tools,
           signal,
         });

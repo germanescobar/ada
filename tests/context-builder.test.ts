@@ -7,7 +7,6 @@ import test from "node:test";
 
 import { ContextBuilder } from "../src/agent/context-builder.js";
 import { PolicyEngine } from "../src/agent/policies.js";
-import type { Message } from "../src/types/messages.js";
 
 function createTempDir(): string {
   return mkdtempSync(path.join(tmpdir(), "ada-context-builder-"));
@@ -76,7 +75,7 @@ test("buildSystemPrompt includes additional CLI system prompt without replacing 
       systemPrompt: "Answer tersely.",
     }).buildSystemPrompt();
 
-    assert.match(prompt, /You are Anita, a coding agent\./);
+    assert.match(prompt, /You are Anita, an extremely capable coding agent\./);
     assert.match(prompt, /Additional system prompt from --system-prompt:/);
     assert.match(
       prompt,
@@ -84,7 +83,7 @@ test("buildSystemPrompt includes additional CLI system prompt without replacing 
     );
     assert.match(prompt, /Answer tersely\./);
     assert.ok(
-      prompt.indexOf("You are Anita, a coding agent.") <
+      prompt.indexOf("You are Anita, an extremely capable coding agent.") <
         prompt.indexOf("Answer tersely."),
     );
   } finally {
@@ -118,7 +117,7 @@ test("buildDynamicContext includes cwd and current git context", async () => {
 
     assert.match(
       context,
-      /Runtime context for the assistant\. This is not a user request:/
+      /Runtime context \(current environment state, refreshed each turn; not a user request\):/
     );
     assert.match(context, /Runtime:/);
     assert.match(context, new RegExp(`Working directory: ${cwd}`));
@@ -171,24 +170,25 @@ test("buildDynamicContext includes explicit permission policy when provided", as
   }
 });
 
-test("buildMessagesWithDynamicContext does not mutate saved messages", async () => {
+test("appendRuntimeContext appends runtime context to the given base prompt", async () => {
   const cwd = createTempDir();
-  const messages: Message[] = [{ role: "user", content: "hello" }];
 
   try {
-    const result = await new ContextBuilder(cwd).buildMessagesWithDynamicContext(
-      messages
-    );
+    runGit(cwd, "init");
+    runGit(cwd, "checkout", "-b", "feature/context");
+    writeFileSync(path.join(cwd, "changed.txt"), "changed\n");
 
-    assert.equal(messages.length, 1);
-    assert.equal(result.length, 2);
-    assert.notEqual(result, messages);
-    assert.equal(result[0]?.role, "user");
+    const builder = new ContextBuilder(cwd);
+    const base = "BASE PROMPT";
+    const prompt = await builder.appendRuntimeContext(base);
+
+    assert.ok(prompt.startsWith(base));
     assert.match(
-      JSON.stringify(result[0]?.content),
-      /Runtime context for the assistant/
+      prompt,
+      /Runtime context \(current environment state, refreshed each turn; not a user request\):/
     );
-    assert.deepEqual(result[1], messages[0]);
+    assert.match(prompt, /Git context:/);
+    assert.match(prompt, /Branch: feature\/context/);
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }

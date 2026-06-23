@@ -1,6 +1,7 @@
 export type EventType =
   | "session_start"
   | "user_message"
+  | "model_request"
   | "assistant_reasoning"
   | "assistant_response"
   | "conversation_compaction"

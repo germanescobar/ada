@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -116,7 +117,7 @@ test("run saves the user message before model failure", async () => {
     const events = await eventStore.getEvents(session.id);
     assert.deepEqual(
       events.map((event) => event.type),
-      ["user_message", "error"]
+      ["user_message", "model_request", "error"]
     );
   } finally {
     rmSync(cwd, { recursive: true, force: true });
@@ -219,21 +220,23 @@ test("run saves assistant responses and tool-result batches before later failure
     const events = await eventStore.getEvents(session.id);
     assert.deepEqual(
       events.map((event) => event.type),
-      ["user_message", "assistant_response", "error"]
+      ["user_message", "model_request", "assistant_response", "error"]
     );
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
 });
 
-test("runtime context is not sent as the latest user turn after tool results", async () => {
+test("runtime context lives in the system prompt, not the user turns", async () => {
   const cwd = createTempDir();
   const session = createSession(cwd);
   const modelMessages: Message[][] = [];
+  const systemPrompts: string[] = [];
   let calls = 0;
   const provider: ModelProvider = {
     async chat(params) {
       modelMessages.push(params.messages);
+      systemPrompts.push(params.systemPrompt);
       calls += 1;
       if (calls === 1) {
         return {
@@ -264,10 +267,13 @@ test("runtime context is not sent as the latest user turn after tool results", a
     await silenceConsole(() => loop.run(session, "Read the README"));
 
     assert.equal(modelMessages.length, 2);
-    assert.match(
-      JSON.stringify(modelMessages[0]?.[0]?.content),
-      /Runtime context for the assistant/
+    // Runtime context belongs in the system prompt, never in the conversation.
+    assert.match(systemPrompts[0], /Runtime context/);
+    assert.doesNotMatch(
+      JSON.stringify(modelMessages[0]),
+      /Runtime context/
     );
+    // The real request is the latest user turn, not buried behind context.
     assert.deepEqual(modelMessages[0]?.at(-1), {
       role: "user",
       content: "Read the README",
@@ -278,6 +284,105 @@ test("runtime context is not sent as the latest user turn after tool results", a
     assert.ok(Array.isArray(secondLast?.content));
     assert.equal(secondLast.content[0]?.type, "tool_result");
     assert.equal(secondLast.content[0]?.content, "file contents");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("model_request is logged once and re-logged only when the prompt changes", async () => {
+  const cwd = createTempDir();
+  // A git repo so the runtime context (and thus the system prompt) shifts when
+  // the working tree changes between turns.
+  execFileSync("git", ["init"], { cwd, stdio: "ignore" });
+  const session = createSession(cwd);
+  let calls = 0;
+  const provider: ModelProvider = {
+    async chat() {
+      calls += 1;
+      if (calls <= 2) {
+        return {
+          stopReason: "tool_use",
+          content: [
+            {
+              type: "tool_use",
+              id: `tool-${calls}`,
+              name: "run_command",
+              input: { command: "noop" },
+            },
+          ],
+        };
+      }
+      return { stopReason: "end_turn", content: [{ type: "text", text: "Done." }] };
+    },
+  };
+  let toolCalls = 0;
+  const { loop, eventStore } = createLoop(cwd, provider, async () => {
+    toolCalls += 1;
+    // Only the first tool changes the working tree, so the prompt differs
+    // between turn 1 and turn 2, then stays the same for turn 3.
+    if (toolCalls === 1) {
+      writeFileSync(path.join(cwd, "new-file.txt"), "created\n");
+    }
+    return { content: "ok" };
+  });
+
+  try {
+    await silenceConsole(() => loop.run(session, "Do work"));
+
+    const modelRequests = (await eventStore.getEvents(session.id)).filter(
+      (event) => event.type === "model_request"
+    );
+    // Three model calls, but the prompt only changes once (turn 1 -> turn 2),
+    // so the unchanged turn 3 is not logged again.
+    assert.equal(modelRequests.length, 2);
+    assert.notEqual(
+      modelRequests[0].data.systemPrompt,
+      modelRequests[1].data.systemPrompt
+    );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("AGENTS.md written mid-run is not reloaded into the system prompt", async () => {
+  const cwd = createTempDir();
+  const session = createSession(cwd);
+  const systemPrompts: string[] = [];
+  let calls = 0;
+  const provider: ModelProvider = {
+    async chat(params) {
+      systemPrompts.push(params.systemPrompt);
+      calls += 1;
+      if (calls === 1) {
+        return {
+          stopReason: "tool_use",
+          content: [
+            {
+              type: "tool_use",
+              id: "tool-1",
+              name: "run_command",
+              input: { command: "noop" },
+            },
+          ],
+        };
+      }
+      return { stopReason: "end_turn", content: [{ type: "text", text: "Done." }] };
+    },
+  };
+  const { loop } = createLoop(cwd, provider, async () => {
+    // A tool generates repo instructions during the run. They must not become
+    // live system instructions on the next turn.
+    writeFileSync(path.join(cwd, "AGENTS.md"), "INJECTED INSTRUCTION\n");
+    return { content: "ok" };
+  });
+
+  try {
+    await silenceConsole(() => loop.run(session, "Do work"));
+
+    assert.equal(systemPrompts.length, 2);
+    for (const prompt of systemPrompts) {
+      assert.doesNotMatch(prompt, /INJECTED INSTRUCTION/);
+    }
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
@@ -366,7 +471,7 @@ test("run saves synthetic error tool results when tool execution throws", async 
     const events = await eventStore.getEvents(session.id);
     assert.deepEqual(
       events.map((event) => event.type),
-      ["user_message", "assistant_response", "error"]
+      ["user_message", "model_request", "assistant_response", "error"]
     );
   } finally {
     rmSync(cwd, { recursive: true, force: true });
@@ -444,7 +549,7 @@ test("run records a cancellation when aborted while waiting on the model", async
     const events = await eventStore.getEvents(session.id);
     assert.deepEqual(
       events.map((event) => event.type),
-      ["user_message", "run_cancelled"]
+      ["user_message", "model_request", "run_cancelled"]
     );
 
     const saved = await sessionStore.load(session.id);
@@ -488,7 +593,7 @@ test("run records a cancellation when aborted during a streaming response", asyn
     const events = await eventStore.getEvents(session.id);
     assert.deepEqual(
       events.map((event) => event.type),
-      ["user_message", "run_cancelled"]
+      ["user_message", "model_request", "run_cancelled"]
     );
 
     const saved = await sessionStore.load(session.id);
@@ -539,7 +644,7 @@ test("run records a cancellation when aborted before a tool executes", async () 
     const events = await eventStore.getEvents(session.id);
     assert.deepEqual(
       events.map((event) => event.type),
-      ["user_message", "assistant_response", "run_cancelled"]
+      ["user_message", "model_request", "assistant_response", "run_cancelled"]
     );
 
     // The partial assistant turn and tool batch are not persisted, keeping the
@@ -596,7 +701,7 @@ test("run records a cancellation when a tool returns an aborted result instead o
     const events = await eventStore.getEvents(session.id);
     assert.deepEqual(
       events.map((event) => event.type),
-      ["user_message", "assistant_response", "run_cancelled"]
+      ["user_message", "model_request", "assistant_response", "run_cancelled"]
     );
 
     // The aborted tool result must not be persisted.
@@ -724,7 +829,7 @@ test("run emits normalized stream-json model deltas before tool execution", asyn
     const events = await eventStore.getEvents(session.id);
     assert.deepEqual(
       events.map((event) => event.type),
-      ["user_message", "assistant_response", "assistant_response"]
+      ["user_message", "model_request", "assistant_response", "assistant_response"]
     );
   } finally {
     rmSync(cwd, { recursive: true, force: true });
