@@ -170,7 +170,7 @@ test("buildDynamicContext includes explicit permission policy when provided", as
   }
 });
 
-test("buildSystemPromptWithRuntimeContext appends runtime context to the system prompt", async () => {
+test("appendRuntimeContext appends runtime context to the given base prompt", async () => {
   const cwd = createTempDir();
 
   try {
@@ -179,9 +179,10 @@ test("buildSystemPromptWithRuntimeContext appends runtime context to the system 
     writeFileSync(path.join(cwd, "changed.txt"), "changed\n");
 
     const builder = new ContextBuilder(cwd);
-    const prompt = await builder.buildSystemPromptWithRuntimeContext();
+    const base = "BASE PROMPT";
+    const prompt = await builder.appendRuntimeContext(base);
 
-    assert.ok(prompt.startsWith(builder.buildSystemPrompt()));
+    assert.ok(prompt.startsWith(base));
     assert.match(
       prompt,
       /Runtime context \(current environment state, refreshed each turn; not a user request\):/

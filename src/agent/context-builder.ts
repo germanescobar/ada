@@ -71,18 +71,22 @@ export class ContextBuilder {
   }
 
   /*
-   * Builds the system prompt with the dynamic runtime context appended.
+   * Appends the dynamic runtime context to an already-built base system prompt.
    *
    * Runtime context (environment, policy, git state) belongs in the system
    * prompt rather than as a separate user turn. Injecting it as a user message
    * placed it adjacent to the real request, and weaker models conflated the two
-   * and treated the actual request as context. It is rebuilt each turn so the
-   * git state stays current.
+   * and treated the actual request as context.
+   *
+   * The caller passes the base prompt so it can be built once per run: rebuilding
+   * it each turn would reload AGENTS.md from disk and let a tool that writes
+   * AGENTS.md inject generated text as system instructions mid-run. Only the
+   * runtime context is refreshed here so git state stays current.
    */
-  async buildSystemPromptWithRuntimeContext(): Promise<string> {
+  async appendRuntimeContext(baseSystemPrompt: string): Promise<string> {
     const dynamicContext = await this.buildDynamicContext();
-    if (!dynamicContext) return this.buildSystemPrompt();
-    return `${this.buildSystemPrompt()}\n\n${dynamicContext}`;
+    if (!dynamicContext) return baseSystemPrompt;
+    return `${baseSystemPrompt}\n\n${dynamicContext}`;
   }
 
   private buildUserSystemPromptSection(): string {

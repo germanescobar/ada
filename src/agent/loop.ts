@@ -96,6 +96,11 @@ export class AgentLoop {
       await this.saveSession(session);
 
       const tools = this.registry.toSchemas();
+      // Build the base system prompt once per run. It loads AGENTS.md from disk,
+      // so rebuilding it each turn would let a tool that writes AGENTS.md inject
+      // freshly generated text as system instructions mid-run. Only the runtime
+      // context is refreshed per turn.
+      const baseSystemPrompt = this.contextBuilder.buildSystemPrompt();
       let finalStopReason = "max_iterations";
       let status: "completed" | "max_iterations" = "max_iterations";
       // Track the last logged system prompt so the model_request event is only
@@ -118,7 +123,7 @@ export class AgentLoop {
 
         const modelContextItems = await this.buildModelContextItems(session);
         const systemPrompt =
-          await this.contextBuilder.buildSystemPromptWithRuntimeContext();
+          await this.contextBuilder.appendRuntimeContext(baseSystemPrompt);
 
         if (systemPrompt !== lastLoggedSystemPrompt) {
           await this.eventStore.append(session.id, "model_request", {

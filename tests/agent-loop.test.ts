@@ -344,6 +344,50 @@ test("model_request is logged once and re-logged only when the prompt changes", 
   }
 });
 
+test("AGENTS.md written mid-run is not reloaded into the system prompt", async () => {
+  const cwd = createTempDir();
+  const session = createSession(cwd);
+  const systemPrompts: string[] = [];
+  let calls = 0;
+  const provider: ModelProvider = {
+    async chat(params) {
+      systemPrompts.push(params.systemPrompt);
+      calls += 1;
+      if (calls === 1) {
+        return {
+          stopReason: "tool_use",
+          content: [
+            {
+              type: "tool_use",
+              id: "tool-1",
+              name: "run_command",
+              input: { command: "noop" },
+            },
+          ],
+        };
+      }
+      return { stopReason: "end_turn", content: [{ type: "text", text: "Done." }] };
+    },
+  };
+  const { loop } = createLoop(cwd, provider, async () => {
+    // A tool generates repo instructions during the run. They must not become
+    // live system instructions on the next turn.
+    writeFileSync(path.join(cwd, "AGENTS.md"), "INJECTED INSTRUCTION\n");
+    return { content: "ok" };
+  });
+
+  try {
+    await silenceConsole(() => loop.run(session, "Do work"));
+
+    assert.equal(systemPrompts.length, 2);
+    for (const prompt of systemPrompts) {
+      assert.doesNotMatch(prompt, /INJECTED INSTRUCTION/);
+    }
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test("run saves synthetic error tool results when tool execution throws", async () => {
   const cwd = createTempDir();
   const session = createSession(cwd);
