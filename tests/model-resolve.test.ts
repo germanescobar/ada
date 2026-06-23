@@ -223,13 +223,13 @@ test("discovers installed local Ollama models from the tags API", async () => {
 
   assert.deepEqual(options, [
     {
-      label: "gemma4:31b (local)",
+      label: "gemma4:31b",
       value: "ollama/gemma4:31b",
       group: "Ollama Local",
       contextWindowTokens: 128_000,
     },
     {
-      label: "qwen3:latest (local)",
+      label: "qwen3:latest",
       value: "ollama/qwen3:latest",
       group: "Ollama Local",
       contextWindowTokens: 128_000,
