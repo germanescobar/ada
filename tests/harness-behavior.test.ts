@@ -134,11 +134,12 @@ test("run preserves prior messages and passes deterministic tool schemas", async
       requests[0].tools.map((tool) => tool.name),
       ["alpha", "zeta"]
     );
-    assert.match(
-      JSON.stringify(requests[0].messages[0]?.content),
-      /Runtime context for the assistant/
+    assert.match(requests[0].systemPrompt, /Runtime context/);
+    assert.doesNotMatch(
+      JSON.stringify(requests[0].messages),
+      /Runtime context/
     );
-    assert.deepEqual(requests[0].messages.slice(1, 4), [
+    assert.deepEqual(requests[0].messages.slice(0, 3), [
       { role: "user", content: "Earlier request" },
       {
         role: "assistant",
@@ -238,16 +239,13 @@ test("run compacts older messages when the approximate context budget is exceede
       JSON.stringify(requests[0].messages[0].content),
       /Second request/
     );
+    assert.match(requests[1].systemPrompt, /Runtime context/);
+    assert.equal(requests[1].messages[0].role, "user");
     assert.match(
       JSON.stringify(requests[1].messages[0].content),
-      /Runtime context for the assistant/
-    );
-    assert.equal(requests[1].messages[1].role, "user");
-    assert.match(
-      JSON.stringify(requests[1].messages[1].content),
       /Previous conversation summary/
     );
-    assert.deepEqual(requests[1].messages.slice(2, 5), [
+    assert.deepEqual(requests[1].messages.slice(1, 4), [
       preservedToolUse,
       preservedToolResult,
       { role: "user", content: "Current request" },
@@ -278,7 +276,12 @@ test("run compacts older messages when the approximate context budget is exceede
     const events = await eventStore.getEvents(session.id);
     assert.deepEqual(
       events.map((event) => event.type),
-      ["user_message", "conversation_compaction", "assistant_response"]
+      [
+        "user_message",
+        "conversation_compaction",
+        "model_request",
+        "assistant_response",
+      ]
     );
     assert.equal(events[1].data.summarizedMessages, 3);
     assert.equal(typeof events[1].data.preservedRecentTokens, "number");
@@ -355,11 +358,8 @@ test("run compaction keeps parallel tool-call batches intact", async () => {
     await silenceConsole(() => loop.run(session, "Current request"));
 
     assert.equal(requests.length, 2);
-    assert.match(
-      JSON.stringify(requests[1].messages[0]?.content),
-      /Runtime context for the assistant/
-    );
-    assert.deepEqual(requests[1].messages.slice(2, 5), [
+    assert.match(requests[1].systemPrompt, /Runtime context/);
+    assert.deepEqual(requests[1].messages.slice(1, 4), [
       oldMessages[3],
       oldMessages[4],
       { role: "user", content: "Current request" },
@@ -566,9 +566,15 @@ test("policy-denied tool calls are returned as error tool results", async () => 
     const events = await eventStore.getEvents(session.id);
     assert.deepEqual(
       events.map((event) => event.type),
-      ["user_message", "assistant_response", "policy_decision", "assistant_response"]
+      [
+        "user_message",
+        "model_request",
+        "assistant_response",
+        "policy_decision",
+        "assistant_response",
+      ]
     );
-    assert.deepEqual(events[2].data, {
+    assert.deepEqual(events[3].data, {
       tool: "run_command",
       input: { command: "rm -rf /" },
       decision: "deny",
@@ -632,9 +638,15 @@ test("approval-denied tool calls are returned as error tool results", async () =
     const events = await eventStore.getEvents(session.id);
     assert.deepEqual(
       events.map((event) => event.type),
-      ["user_message", "assistant_response", "policy_decision", "assistant_response"]
+      [
+        "user_message",
+        "model_request",
+        "assistant_response",
+        "policy_decision",
+        "assistant_response",
+      ]
     );
-    assert.equal(events[2].data.decision, "ask");
+    assert.equal(events[3].data.decision, "ask");
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
@@ -691,6 +703,7 @@ test("unknown tool calls are logged and returned as error tool results", async (
       events.map((event) => event.type),
       [
         "user_message",
+        "model_request",
         "assistant_response",
         "policy_decision",
         "tool_call",
@@ -698,7 +711,7 @@ test("unknown tool calls are logged and returned as error tool results", async (
         "assistant_response",
       ]
     );
-    assert.deepEqual(events[4].data, {
+    assert.deepEqual(events[5].data, {
       toolCallId: "tool-1",
       tool: "missing_tool",
       content: "Unknown tool: missing_tool",
@@ -767,9 +780,16 @@ test("malformed run_command input returns a tool error without policy evaluation
     const events = await eventStore.getEvents(session.id);
     assert.deepEqual(
       events.map((event) => event.type),
-      ["user_message", "assistant_response", "tool_call", "tool_result", "assistant_response"]
+      [
+        "user_message",
+        "model_request",
+        "assistant_response",
+        "tool_call",
+        "tool_result",
+        "assistant_response",
+      ]
     );
-    assert.deepEqual(events[3].data, {
+    assert.deepEqual(events[4].data, {
       toolCallId: "tool-1",
       tool: "run_command",
       content:

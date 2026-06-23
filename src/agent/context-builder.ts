@@ -4,8 +4,6 @@ import type {
   PolicyContext,
   PolicyDecision,
 } from "./policies.js";
-import type { ConversationItem } from "../types/conversation.js";
-import type { Message } from "../types/messages.js";
 import type { Skill } from "../skills/skills.js";
 import { formatSkillsForPrompt } from "../skills/skills.js";
 import {
@@ -72,6 +70,21 @@ export class ContextBuilder {
     );
   }
 
+  /*
+   * Builds the system prompt with the dynamic runtime context appended.
+   *
+   * Runtime context (environment, policy, git state) belongs in the system
+   * prompt rather than as a separate user turn. Injecting it as a user message
+   * placed it adjacent to the real request, and weaker models conflated the two
+   * and treated the actual request as context. It is rebuilt each turn so the
+   * git state stays current.
+   */
+  async buildSystemPromptWithRuntimeContext(): Promise<string> {
+    const dynamicContext = await this.buildDynamicContext();
+    if (!dynamicContext) return this.buildSystemPrompt();
+    return `${this.buildSystemPrompt()}\n\n${dynamicContext}`;
+  }
+
   private buildUserSystemPromptSection(): string {
     const systemPrompt = this.runtimeContext.systemPrompt?.trim();
     if (!systemPrompt) return "";
@@ -100,44 +113,13 @@ export class ContextBuilder {
     const policyContext = this.buildPolicyContext();
 
     return [
-      "Runtime context for the assistant. This is not a user request:",
+      "Runtime context (current environment state, refreshed each turn; not a user request):",
       environmentContext,
       policyContext,
       gitContext,
     ]
       .filter(Boolean)
       .join("\n\n");
-  }
-
-  async buildMessagesWithDynamicContext(
-    messages: Message[],
-  ): Promise<Message[]> {
-    const dynamicContext = await this.buildDynamicContext();
-    if (!dynamicContext) return messages;
-
-    return [
-      {
-        role: "user",
-        content: [{ type: "text", text: dynamicContext }],
-      },
-      ...messages,
-    ];
-  }
-
-  async buildItemsWithDynamicContext(
-    items: ConversationItem[],
-  ): Promise<ConversationItem[]> {
-    const dynamicContext = await this.buildDynamicContext();
-    if (!dynamicContext) return items;
-
-    return [
-      {
-        type: "message",
-        role: "user",
-        content: dynamicContext,
-      },
-      ...items,
-    ];
   }
 
   private buildEnvironmentContext(): string {
