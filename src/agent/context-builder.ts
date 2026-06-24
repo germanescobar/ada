@@ -63,9 +63,9 @@ export class ContextBuilder {
     );
     return (
       STATIC_SYSTEM_PROMPT +
+      skillsSection +
       agentInstructionsSection +
       this.buildUserSystemPromptSection() +
-      skillsSection +
       this.buildEnvironmentFooter()
     );
   }

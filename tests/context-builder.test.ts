@@ -7,6 +7,7 @@ import test from "node:test";
 
 import { ContextBuilder } from "../src/agent/context-builder.js";
 import { PolicyEngine } from "../src/agent/policies.js";
+import type { Skill } from "../src/skills/skills.js";
 
 function createTempDir(): string {
   return mkdtempSync(path.join(tmpdir(), "ada-context-builder-"));
@@ -46,17 +47,32 @@ test("buildSystemPrompt includes global and repository AGENTS.md instructions", 
       "Use global defaults.\n",
     );
     writeFileSync(path.join(cwd, "AGENTS.md"), "Use repository rules.\n");
+    const skills: Skill[] = [
+      {
+        name: "test-skill",
+        description: "Test skill.",
+        filePath: path.join(cwd, "skills", "test-skill", "SKILL.md"),
+        baseDir: path.join(cwd, "skills", "test-skill"),
+        disableModelInvocation: false,
+      },
+    ];
 
     const prompt = new ContextBuilder(cwd, {
       agentsHomeDir: homeDir,
       agentsRepositoryRoot: cwd,
+      skills,
     }).buildSystemPrompt();
 
+    assert.match(prompt, /<available_skills>/);
     assert.match(prompt, /Additional instructions from AGENTS\.md files:/);
     assert.match(prompt, /Global AGENTS\.md/);
     assert.match(prompt, /Use global defaults\./);
     assert.match(prompt, /Repository AGENTS\.md/);
     assert.match(prompt, /Use repository rules\./);
+    assert.ok(
+      prompt.indexOf("<available_skills>") <
+        prompt.indexOf("Additional instructions from AGENTS.md files:"),
+    );
     assert.ok(
       prompt.indexOf("Use global defaults.") <
         prompt.indexOf("Use repository rules."),
