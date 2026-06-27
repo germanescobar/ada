@@ -126,21 +126,53 @@ function isAlreadyExistsError(err: unknown): boolean {
 
 async function askApproval(
   toolName: string,
-  input: Record<string, unknown>
+  input: Record<string, unknown>,
+  signal?: AbortSignal
+): Promise<boolean> {
+  return askApprovalOn(
+    { input: process.stdin, output: process.stdout },
+    toolName,
+    input,
+    signal
+  );
+}
+
+export async function askApprovalOn(
+  streams: { input: NodeJS.ReadableStream; output: NodeJS.WritableStream },
+  toolName: string,
+  input: Record<string, unknown>,
+  signal?: AbortSignal
 ): Promise<boolean> {
   const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
+    input: streams.input,
+    output: streams.output,
   });
 
   const summary =
     toolName === "run_command" ? (input.command as string) : JSON.stringify(input);
 
-  const answer = await new Promise<string>((resolve) => {
-    rl.question(chalk.yellow(`Allow ${toolName}: ${summary}? [y/n] `), resolve);
+  return new Promise<boolean>((resolve) => {
+    let settled = false;
+    const settle = (value: boolean) => {
+      if (settled) return;
+      settled = true;
+      signal?.removeEventListener("abort", onAbort);
+      rl.close();
+      resolve(value);
+    };
+    const onAbort = () => settle(false);
+
+    if (signal?.aborted) {
+      settle(false);
+      return;
+    }
+    signal?.addEventListener("abort", onAbort, { once: true });
+
+    rl.question(
+      chalk.yellow(`Allow ${toolName}: ${summary}? [y/n] `),
+      (answer) => settle(answer.toLowerCase().startsWith("y"))
+    );
   });
-  rl.close();
-  return answer.toLowerCase().startsWith("y");
 }
 
 export function createCLI() {
