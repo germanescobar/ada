@@ -126,21 +126,64 @@ function isAlreadyExistsError(err: unknown): boolean {
 
 async function askApproval(
   toolName: string,
-  input: Record<string, unknown>
+  input: Record<string, unknown>,
+  signal?: AbortSignal
+): Promise<boolean> {
+  return askApprovalOn(
+    { input: process.stdin, output: process.stdout },
+    toolName,
+    input,
+    signal
+  );
+}
+
+export async function askApprovalOn(
+  streams: { input: NodeJS.ReadableStream; output: NodeJS.WritableStream },
+  toolName: string,
+  input: Record<string, unknown>,
+  signal?: AbortSignal,
+  hooks?: { onReadline?: (rl: readline.Interface) => void }
 ): Promise<boolean> {
   const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
+    input: streams.input,
+    output: streams.output,
   });
+  hooks?.onReadline?.(rl);
 
   const summary =
     toolName === "run_command" ? (input.command as string) : JSON.stringify(input);
 
-  const answer = await new Promise<string>((resolve) => {
-    rl.question(chalk.yellow(`Allow ${toolName}: ${summary}? [y/n] `), resolve);
+  return new Promise<boolean>((resolve) => {
+    let settled = false;
+    const settle = (value: boolean) => {
+      if (settled) return;
+      settled = true;
+      signal?.removeEventListener("abort", onAbort);
+      rl.removeListener("SIGINT", onRlSigint);
+      rl.removeListener("close", onRlClose);
+      rl.close();
+      resolve(value);
+    };
+    const onAbort = () => settle(false);
+    // Readline captures Ctrl-C on a TTY and pauses stdin instead of letting
+    // the process-level SIGINT handler fire. Listen for the interface's own
+    // SIGINT event so a first Ctrl-C still cancels the prompt.
+    const onRlSigint = () => settle(false);
+    const onRlClose = () => settle(false);
+
+    if (signal?.aborted) {
+      settle(false);
+      return;
+    }
+    signal?.addEventListener("abort", onAbort, { once: true });
+    rl.on("SIGINT", onRlSigint);
+    rl.on("close", onRlClose);
+
+    rl.question(
+      chalk.yellow(`Allow ${toolName}: ${summary}? [y/n] `),
+      (answer) => settle(answer.toLowerCase().startsWith("y"))
+    );
   });
-  rl.close();
-  return answer.toLowerCase().startsWith("y");
 }
 
 export function createCLI() {

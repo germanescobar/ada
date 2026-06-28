@@ -5,7 +5,8 @@ import type { PolicyDecision, PolicyEngine } from "./policies.js";
 
 export type ApprovalCallback = (
   toolName: string,
-  input: Record<string, unknown>
+  input: Record<string, unknown>,
+  signal?: AbortSignal
 ) => Promise<boolean>;
 
 export class Executor {
@@ -61,7 +62,8 @@ export class Executor {
     if (decision === "ask") {
       const approved = await this.approvalCallback(
         toolCall.name,
-        toolCall.input
+        toolCall.input,
+        options?.signal
       );
       if (!approved) {
         return {
