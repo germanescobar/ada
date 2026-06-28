@@ -200,6 +200,39 @@ Example stream:
 {"type":"run.completed","sessionId":"9e6f8a7d-7ff1-4c2c-b3d8-9c3ed5a1d4b7","status":"completed","stopReason":"end_turn","timestamp":"2026-04-09T15:00:01.000Z"}
 ```
 
+#### Approvals in `--stream-json` mode
+
+When a tool call requires approval (policy returns `ask`), the CLI emits two
+extra events around the gate so consumers can audit decisions. They fire in
+every mode — including `--auto-approve` and human TTY mode — so the stream
+shape is uniform regardless of how the answer was produced.
+
+```json
+{"type":"approval.request","id":"toolu_123","tool":"run_command","input":{"command":"npm test"},"timestamp":"…"}
+{"type":"approval.resolved","id":"toolu_123","approved":true,"reason":"user","timestamp":"…"}
+```
+
+`id` is the model's tool call id and matches the surrounding `tool.call` /
+`tool.result` lifecycle. `input` is the structured object, never a pre-rendered
+string. `reason` is one of:
+
+- `user` — the responder answered.
+- `aborted` — the run's `AbortSignal` fired while waiting.
+- `eof` — the consumer closed stdin before answering.
+- `error` — the approval callback itself threw.
+
+When stdin is a pipe, the CLI never writes a prompt to stdout or stderr. The
+consumer answers by writing a single JSON line to stdin:
+
+```json
+{"type":"approval.response","id":"toolu_123","approved":true}
+```
+
+The resolver waits silently on stdin. Mismatched `id`s, malformed JSON, and
+unknown message types are discarded (logged to stderr) so a stale response
+can't poison the run. There is exactly one approval pending at a time — the
+executor runs tool calls sequentially.
+
 Without `--stream-json`, the CLI uses the normal human-readable terminal output.
 
 When using an OpenAI-compatible backend that exposes reasoning traces, Anita will also store them in the `assistant_response` event payload as `reasoning` and emit an `assistant.reasoning` stream event.

@@ -5,6 +5,7 @@ import path from "node:path";
 import chalk from "chalk";
 import { Command } from "commander";
 
+import type { ApprovalAnswer, ApprovalRequest } from "../types/approval.js";
 import { EventStore } from "../storage/event-store.js";
 import { SessionStore } from "../storage/session-store.js";
 import { ToolRegistry } from "../tools/registry.js";
@@ -124,23 +125,49 @@ function isAlreadyExistsError(err: unknown): boolean {
   return err instanceof Error && "code" in err && err.code === "EEXIST";
 }
 
-async function askApproval(
-  toolName: string,
-  input: Record<string, unknown>,
+function askApproval(
+  request: ApprovalRequest,
   signal?: AbortSignal
-): Promise<boolean> {
+): Promise<ApprovalAnswer> {
   return askApprovalOn(
     { input: process.stdin, output: process.stdout },
-    toolName,
-    input,
+    request,
     signal
   );
 }
 
+/**
+ * Builds an approval responder suited to the current CLI mode.
+ *
+ * Selection rules (matches the issue #75 spec):
+ * - `--auto-approve` (with or without `--stream-json`): never prompts the
+ *   user. Always resolves true so the Executor emits the audit events but
+ *   the user is never interrupted.
+ * - `--stream-json` with a piped stdin (no TTY): the stdin line protocol
+ *   responder. It reads JSON lines like
+ *   `{"type":"approval.response","id":"<toolCallId>","approved":<bool>}`
+ *   from stdin and never writes a prompt to stdout/stderr.
+ * - Otherwise (no flags or `--stream-json` with a TTY stdin): the readline
+ *   prompt, identical to today's behavior.
+ */
+export function createApprovalResponder(
+  options: { autoApprove?: boolean; streamJson?: boolean } = {}
+): (request: ApprovalRequest, signal?: AbortSignal) => Promise<ApprovalAnswer> {
+  if (options.autoApprove) {
+    return async () => true;
+  }
+  if (options.streamJson && !process.stdin.isTTY) {
+    return createStdinApprovalResponder({
+      input: process.stdin,
+      stderr: process.stderr,
+    });
+  }
+  return askApproval;
+}
+
 export async function askApprovalOn(
   streams: { input: NodeJS.ReadableStream; output: NodeJS.WritableStream },
-  toolName: string,
-  input: Record<string, unknown>,
+  request: ApprovalRequest,
   signal?: AbortSignal,
   hooks?: { onReadline?: (rl: readline.Interface) => void }
 ): Promise<boolean> {
@@ -151,7 +178,9 @@ export async function askApprovalOn(
   hooks?.onReadline?.(rl);
 
   const summary =
-    toolName === "run_command" ? (input.command as string) : JSON.stringify(input);
+    request.toolName === "run_command"
+      ? (request.input.command as string) ?? JSON.stringify(request.input)
+      : JSON.stringify(request.input);
 
   return new Promise<boolean>((resolve) => {
     let settled = false;
@@ -180,10 +209,111 @@ export async function askApprovalOn(
     rl.on("close", onRlClose);
 
     rl.question(
-      chalk.yellow(`Allow ${toolName}: ${summary}? [y/n] `),
+      chalk.yellow(`Allow ${request.toolName}: ${summary}? [y/n] `),
       (answer) => settle(answer.toLowerCase().startsWith("y"))
     );
   });
+}
+
+/**
+ * Stdin line protocol responder used when `--stream-json` is active and
+ * stdin is not a TTY. Reads JSON lines from stdin and resolves the pending
+ * approval when a matching response arrives. See issue #75 §4 for the
+ * protocol and the mismatch / malformed / EOF / abort cases.
+ *
+ * Invariant: at most one approval is pending at a time (Executor runs tool
+ * calls sequentially). The responder therefore buffers exactly one pending
+ * request and discards responses received while no request is in flight.
+ */
+export function createStdinApprovalResponder(streams: {
+  input: NodeJS.ReadableStream;
+  stderr?: NodeJS.WritableStream;
+}): (request: ApprovalRequest, signal?: AbortSignal) => Promise<ApprovalAnswer> {
+  type Pending = {
+    request: ApprovalRequest;
+    resolve: (value: ApprovalAnswer) => void;
+  };
+  let pending: Pending | undefined;
+  let closed = false;
+
+  const onLine = (line: string) => {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch (err) {
+      // Malformed JSON: log to stderr, discard, do not resolve.
+      streams.stderr?.write(
+        `anita: discarded malformed approval.response line (${(err as Error).message})\n`
+      );
+      return;
+    }
+    if (
+      !parsed ||
+      typeof parsed !== "object" ||
+      (parsed as { type?: unknown }).type !== "approval.response"
+    ) {
+      return;
+    }
+    const { id, approved } = parsed as {
+      id?: unknown;
+      approved?: unknown;
+    };
+    if (typeof id !== "string" || typeof approved !== "boolean") {
+      streams.stderr?.write(
+        "anita: discarded approval.response with invalid id/approved\n"
+      );
+      return;
+    }
+    if (!pending) {
+      streams.stderr?.write(
+        "anita: discarded approval.response with no pending request\n"
+      );
+      return;
+    }
+    if (pending.request.toolCallId !== id) {
+      // Desync recovery: don't poison the run with a stale response.
+      streams.stderr?.write(
+        `anita: discarded approval.response for unknown id ${id} (waiting on ${pending.request.toolCallId})\n`
+      );
+      return;
+    }
+    const current = pending;
+    pending = undefined;
+    current.resolve(approved);
+  };
+
+  const onEnd = () => {
+    closed = true;
+    if (pending) {
+      const current = pending;
+      pending = undefined;
+      current.resolve(false);
+    }
+  };
+
+  const rl = readline.createInterface({ input: streams.input, crlfDelay: Infinity });
+  rl.on("line", onLine);
+  rl.on("close", onEnd);
+
+  return async (request, signal) => {
+    if (closed) return { approved: false, reason: "eof" };
+    return new Promise<ApprovalAnswer>((resolve) => {
+      pending = { request, resolve };
+      const settle = (value: ApprovalAnswer) => {
+        if (pending && pending.request.toolCallId === request.toolCallId) {
+          pending = undefined;
+          resolve(value);
+        }
+      };
+      if (signal?.aborted) {
+        settle({ approved: false, reason: "eof" });
+        return;
+      }
+      signal?.addEventListener("abort", () => settle(false), { once: true });
+    });
+  };
 }
 
 export function createCLI() {
@@ -344,7 +474,10 @@ export function createCLI() {
         skills,
         systemPrompt,
       });
-      const approvalFn = autoApprove ? async () => true : askApproval;
+      const approvalFn = createApprovalResponder({
+        autoApprove,
+        streamJson,
+      });
       const executor = new Executor(registry, policyEngine, eventStore, approvalFn);
       const loop = new AgentLoop(
         provider,
