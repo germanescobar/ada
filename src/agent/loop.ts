@@ -766,14 +766,11 @@ export class AgentLoop {
         return;
       }
       case "approval.request": {
+        // The readline responder in `askApprovalOn` prints the actual prompt;
+        // emitting one here would show it twice in human mode. The structured
+        // `approval.resolved` event still prints the audit decision below so
+        // the user sees the outcome of every gate.
         this.finishPendingTerminalDelta();
-        const summary =
-          event.tool === "run_command"
-            ? (event.input.command as string | undefined) ?? JSON.stringify(event.input)
-            : JSON.stringify(event.input);
-        console.log(
-          chalk.yellow(`Allow ${event.tool}: ${summary}? [y/n]`)
-        );
         return;
       }
       case "approval.resolved": {

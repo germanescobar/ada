@@ -109,15 +109,15 @@ test("stdin approval responder discards unknown message types without resolving"
   assert.equal(approved, true);
 });
 
-test("stdin approval responder resolves false on EOF when no answer arrives", async () => {
+test("stdin approval responder resolves with reason=eof on EOF when no answer arrives", async () => {
   const { input, stderr } = createStreams();
   const responder = createStdinApprovalResponder({ input, stderr });
   const pending = responder(createRequest());
 
   await flush();
   input.end();
-  const approved = await pending;
-  assert.equal(approved, false);
+  const answer = await pending;
+  assert.deepEqual(answer, { approved: false, reason: "eof" });
 });
 
 test("stdin approval responder resolves false on AbortSignal", async () => {
@@ -152,4 +152,24 @@ test("stdin approval responder discards responses received before any request", 
   );
   const approved = await pending;
   assert.equal(approved, true);
+});
+
+test("stdin approval responder close() resolves pending requests with reason=eof", async () => {
+  const { input, stderr } = createStreams();
+  const responder = createStdinApprovalResponder({ input, stderr });
+  const pending = responder(createRequest());
+  await flush();
+  // Close without sending an answer or closing stdin.
+  responder.close();
+  const answer = await pending;
+  assert.deepEqual(answer, { approved: false, reason: "eof" });
+});
+
+test("stdin approval responder close() is idempotent and short-circuits later calls", async () => {
+  const { input } = createStreams();
+  const responder = createStdinApprovalResponder({ input });
+  responder.close();
+  responder.close();
+  const answer = await responder(createRequest());
+  assert.deepEqual(answer, { approved: false, reason: "eof" });
 });

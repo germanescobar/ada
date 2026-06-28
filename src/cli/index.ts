@@ -228,7 +228,15 @@ export async function askApprovalOn(
 export function createStdinApprovalResponder(streams: {
   input: NodeJS.ReadableStream;
   stderr?: NodeJS.WritableStream;
-}): (request: ApprovalRequest, signal?: AbortSignal) => Promise<ApprovalAnswer> {
+}): ((request: ApprovalRequest, signal?: AbortSignal) => Promise<ApprovalAnswer>) & {
+  /**
+   * Detach the readline interface from stdin. The CLI calls this in a
+   * `finally` after the run completes so a long-lived orchestrator piping
+   * JSON events on stdout and approval responses on stdin does not hang.
+   * Idempotent and safe to call multiple times.
+   */
+  close(): void;
+} {
   type Pending = {
     request: ApprovalRequest;
     resolve: (value: ApprovalAnswer) => void;
@@ -289,7 +297,10 @@ export function createStdinApprovalResponder(streams: {
     if (pending) {
       const current = pending;
       pending = undefined;
-      current.resolve(false);
+      // EOF while a request is in flight must surface as `reason: "eof"` so
+      // consumers can distinguish "user said no" from "consumer closed the
+      // pipe mid-run" (issue #75 §4).
+      current.resolve({ approved: false, reason: "eof" });
     }
   };
 
@@ -297,23 +308,41 @@ export function createStdinApprovalResponder(streams: {
   rl.on("line", onLine);
   rl.on("close", onEnd);
 
-  return async (request, signal) => {
-    if (closed) return { approved: false, reason: "eof" };
-    return new Promise<ApprovalAnswer>((resolve) => {
-      pending = { request, resolve };
-      const settle = (value: ApprovalAnswer) => {
-        if (pending && pending.request.toolCallId === request.toolCallId) {
-          pending = undefined;
-          resolve(value);
+  // Returns a function that disposes the stdin reader. The chat command calls
+  // this from a `finally` block so a long-lived orchestrator piping JSON
+  // events on stdout and approval responses on stdin does not hang after
+  // `loop.run` returns. The responder is single-use: after close, further
+  // calls short-circuit to a structured EOF answer.
+  function close() {
+    if (closed) return;
+    closed = true;
+    rl.close();
+    if (pending) {
+      const current = pending;
+      pending = undefined;
+      current.resolve({ approved: false, reason: "eof" });
+    }
+  }
+
+  const answer: (request: ApprovalRequest, signal?: AbortSignal) => Promise<ApprovalAnswer> =
+    async (request, signal) => {
+      if (closed) return { approved: false, reason: "eof" };
+      return new Promise<ApprovalAnswer>((resolve) => {
+        pending = { request, resolve };
+        const settle = (value: ApprovalAnswer) => {
+          if (pending && pending.request.toolCallId === request.toolCallId) {
+            pending = undefined;
+            resolve(value);
+          }
+        };
+        if (signal?.aborted) {
+          settle({ approved: false, reason: "eof" });
+          return;
         }
-      };
-      if (signal?.aborted) {
-        settle({ approved: false, reason: "eof" });
-        return;
-      }
-      signal?.addEventListener("abort", () => settle(false), { once: true });
-    });
-  };
+        signal?.addEventListener("abort", () => settle(false), { once: true });
+      });
+    };
+  return Object.assign(answer, { close });
 }
 
 export function createCLI() {
@@ -534,6 +563,15 @@ export function createCLI() {
         process.exit(1);
       } finally {
         process.off("SIGINT", onSigint);
+        // Detach any stdin readline the responder opened so the process can
+        // exit naturally instead of waiting for stdin to close. The
+        // auto-approve and readline responders return plain async functions
+        // without a `close` method; only the stdin line-protocol responder
+        // exposes one.
+        const close = (
+          approvalFn as { close?: () => void }
+        ).close;
+        if (typeof close === "function") close();
       }
 
       if (interrupted) {
