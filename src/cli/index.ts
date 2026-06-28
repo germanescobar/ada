@@ -141,12 +141,14 @@ export async function askApprovalOn(
   streams: { input: NodeJS.ReadableStream; output: NodeJS.WritableStream },
   toolName: string,
   input: Record<string, unknown>,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  hooks?: { onReadline?: (rl: readline.Interface) => void }
 ): Promise<boolean> {
   const rl = readline.createInterface({
     input: streams.input,
     output: streams.output,
   });
+  hooks?.onReadline?.(rl);
 
   const summary =
     toolName === "run_command" ? (input.command as string) : JSON.stringify(input);
@@ -157,16 +159,25 @@ export async function askApprovalOn(
       if (settled) return;
       settled = true;
       signal?.removeEventListener("abort", onAbort);
+      rl.removeListener("SIGINT", onRlSigint);
+      rl.removeListener("close", onRlClose);
       rl.close();
       resolve(value);
     };
     const onAbort = () => settle(false);
+    // Readline captures Ctrl-C on a TTY and pauses stdin instead of letting
+    // the process-level SIGINT handler fire. Listen for the interface's own
+    // SIGINT event so a first Ctrl-C still cancels the prompt.
+    const onRlSigint = () => settle(false);
+    const onRlClose = () => settle(false);
 
     if (signal?.aborted) {
       settle(false);
       return;
     }
     signal?.addEventListener("abort", onAbort, { once: true });
+    rl.on("SIGINT", onRlSigint);
+    rl.on("close", onRlClose);
 
     rl.question(
       chalk.yellow(`Allow ${toolName}: ${summary}? [y/n] `),

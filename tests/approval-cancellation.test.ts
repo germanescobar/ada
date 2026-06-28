@@ -30,6 +30,38 @@ test("askApprovalOn resolves false when the signal aborts mid-prompt", async () 
   assert.equal(approved, false);
 });
 
+test("askApprovalOn resolves false when readline captures a TTY SIGINT", async () => {
+  // Readline swallows the process-level SIGINT and pauses stdin on a TTY, so
+  // the AbortController wired from process.on("SIGINT") never fires. The
+  // prompt must still settle when readline emits its own SIGINT event so a
+  // first Ctrl-C cancels the run instead of leaving it stuck.
+  const { input, output } = createStreams();
+  const controller = new AbortController();
+
+  let capturedRl: import("node:readline").Interface | undefined;
+  const pending = askApprovalOn(
+    { input, output },
+    "run_command",
+    { command: "rm -rf /tmp/important" },
+    controller.signal,
+    {
+      onReadline: (rl) => {
+        capturedRl = rl;
+      },
+    }
+  );
+
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(capturedRl, "expected onReadline hook to capture the interface");
+  // The chat command's process-level SIGINT handler never fires here because
+  // readline has captured Ctrl-C; only the interface event resolves the wait.
+  controller.abort();
+  capturedRl.emit("SIGINT");
+
+  const approved = await pending;
+  assert.equal(approved, false);
+});
+
 test("askApprovalOn resolves true when the user answers y", async () => {
   const { input, output } = createStreams();
   const controller = new AbortController();
