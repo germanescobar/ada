@@ -17,6 +17,11 @@ import type { AttachmentContentBlock, ContentBlock } from "../types/messages.js"
 import type { StreamEvent } from "../types/stream.js";
 import { ContextBuilder } from "./context-builder.js";
 import { Executor } from "./executor.js";
+import type {
+  ApprovalNotifier,
+  ApprovalRequest,
+  ApprovalResolvedEvent,
+} from "../types/approval.js";
 
 const MAX_ITERATIONS = 300;
 const COMPACTION_SUMMARY_HEADER = "Previous conversation summary:";
@@ -53,7 +58,40 @@ export class AgentLoop {
     private sessionStore: SessionStore,
     private streamJson = false,
     private contextBudget: ContextBudgetOptions = DEFAULT_CONTEXT_BUDGET
-  ) {}
+  ) {
+    // Route executor approval events through this loop's stream emitter.
+    // Executor stays unaware of AgentLoop or stream-json mode via the small
+    // ApprovalNotifier seam. Tests that stub the executor may omit the
+    // setter; skip silently in that case.
+    if (typeof this.executor.setApprovalNotifier === "function") {
+      this.executor.setApprovalNotifier(this);
+    }
+  }
+
+  /**
+   * ApprovalNotifier implementation: emits structured stream events around
+   * every approval gate so consumers can correlate the request with the
+   * matching tool.call / tool.result lifecycle.
+   */
+  notifyApprovalRequest(request: ApprovalRequest): void {
+    this.emit({
+      type: "approval.request",
+      id: request.toolCallId,
+      tool: request.toolName,
+      input: request.input,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  notifyApprovalResolved(event: ApprovalResolvedEvent): void {
+    this.emit({
+      type: "approval.resolved",
+      id: event.toolCallId,
+      approved: event.approved,
+      reason: event.reason,
+      timestamp: new Date().toISOString(),
+    });
+  }
 
   async run(
     session: SessionState,
@@ -725,6 +763,23 @@ export class AgentLoop {
         console.log(
           event.isError ? chalk.red(`  ✗ ${preview}`) : chalk.gray(`  ${preview}`)
         );
+        return;
+      }
+      case "approval.request": {
+        // The readline responder in `askApprovalOn` prints the actual prompt;
+        // emitting one here would show it twice in human mode. The structured
+        // `approval.resolved` event still prints the audit decision below so
+        // the user sees the outcome of every gate.
+        this.finishPendingTerminalDelta();
+        return;
+      }
+      case "approval.resolved": {
+        this.finishPendingTerminalDelta();
+        if (event.approved) {
+          console.log(chalk.gray("  approved"));
+        } else {
+          console.log(chalk.red(`  denied (${event.reason})`));
+        }
         return;
       }
     }

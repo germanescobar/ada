@@ -1,9 +1,11 @@
+import { PassThrough } from "node:stream";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 
+import { createStdinApprovalResponder } from "../src/cli/index.js";
 import { ContextBuilder } from "../src/agent/context-builder.js";
 import { Executor } from "../src/agent/executor.js";
 import { AgentLoop } from "../src/agent/loop.js";
@@ -17,7 +19,6 @@ import { runCommandTool } from "../src/tools/run-command.js";
 import type { ModelResponse, SessionState } from "../src/types/agent.js";
 import type { Message } from "../src/types/messages.js";
 import type { ToolDefinition } from "../src/types/tools.js";
-
 function createTempDir(): string {
   return mkdtempSync(path.join(tmpdir(), "ada-harness-behavior-"));
 }
@@ -58,7 +59,9 @@ function createHarness(
     registry?: ToolRegistry;
     policyEngine?: PolicyEngine;
     approve?: () => Promise<boolean>;
+    approvalCallback?: import("../src/types/approval.js").ApprovalCallback;
     contextBudget?: ContextBudgetOptions;
+    streamJson?: boolean;
   } = {}
 ): { loop: AgentLoop; eventStore: EventStore; sessionStore: SessionStore } {
   const eventStore = new EventStore(path.join(cwd, "events"));
@@ -67,7 +70,7 @@ function createHarness(
     options.registry ?? new ToolRegistry(),
     options.policyEngine ?? new PolicyEngine(),
     eventStore,
-    async () => options.approve?.() ?? true
+    options.approvalCallback ?? (async () => options.approve?.() ?? true)
   );
 
   return {
@@ -78,7 +81,7 @@ function createHarness(
       options.registry ?? new ToolRegistry(),
       eventStore,
       sessionStore,
-      false,
+      options.streamJson ?? false,
       options.contextBudget
     ),
     eventStore,
@@ -91,6 +94,21 @@ async function silenceConsole<T>(fn: () => Promise<T>): Promise<T> {
   console.log = () => {};
   try {
     return await fn();
+  } finally {
+    console.log = originalLog;
+  }
+}
+
+async function captureConsole<T>(
+  fn: () => Promise<T>
+): Promise<{ result: T; lines: string[] }> {
+  const originalLog = console.log;
+  const lines: string[] = [];
+  console.log = (value?: unknown) => {
+    lines.push(String(value));
+  };
+  try {
+    return { result: await fn(), lines };
   } finally {
     console.log = originalLog;
   }
@@ -800,6 +818,344 @@ test("malformed run_command input returns a tool error without policy evaluation
       },
     });
   } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("run emits approval.request and approval.resolved events around an ask-decision tool call", async () => {
+  const cwd = createTempDir();
+  const session = createSession(cwd);
+  const responses: ModelResponse[] = [
+    {
+      stopReason: "tool_use",
+      content: [
+        {
+          type: "tool_use",
+          id: "toolu_abc",
+          name: "run_command",
+          input: { command: "npm test" },
+        },
+      ],
+    },
+    {
+      stopReason: "end_turn",
+      content: [{ type: "text", text: "Tests ran." }],
+    },
+  ];
+  const provider: ModelProvider = {
+    async chat() {
+      const response = responses.shift();
+      assert.ok(response);
+      return response;
+    },
+  };
+  const policyEngine = new PolicyEngine();
+  policyEngine.addRule({ toolName: "run_command", decide: () => "ask" });
+  const { loop, eventStore } = createHarness(cwd, provider, {
+    policyEngine,
+    approve: async () => true,
+    streamJson: true,
+  });
+
+  try {
+    const { lines } = await captureConsole(() =>
+      loop.run(session, "Run the tests")
+    );
+    const events = lines.map((line) => JSON.parse(line) as { type: string });
+
+    // approval.request must fire before any tool.call / tool.result for the
+    // same toolCallId, and approval.resolved must fire afterwards. This is
+    // the audit trail consumers rely on (issue #75 §1).
+    const types = events.map((event) => event.type);
+    assert.deepEqual(types, [
+      "run.started",
+      "tool.call",
+      "approval.request",
+      "approval.resolved",
+      "tool.result",
+      "assistant.text",
+      "run.completed",
+    ]);
+    assert.equal(events[2].id, "toolu_abc");
+    assert.equal(events[2].tool, "run_command");
+    assert.deepEqual(events[2].input, { command: "npm test" });
+    assert.equal(events[3].id, "toolu_abc");
+    assert.equal(events[3].approved, true);
+    assert.equal(events[3].reason, "user");
+
+    // The approval events are stream-only and must not be persisted to the
+    // event log; the persisted sequence stays the same.
+    const persisted = await eventStore.getEvents(session.id);
+    assert.deepEqual(
+      persisted.map((event) => event.type),
+      [
+        "user_message",
+        "model_request",
+        "assistant_response",
+        "policy_decision",
+        "tool_call",
+        "tool_result",
+        "assistant_response",
+      ]
+    );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("run emits approval.resolved with reason=aborted when the signal aborts mid-prompt", async () => {
+  const cwd = createTempDir();
+  const session = createSession(cwd);
+  const responses: ModelResponse[] = [
+    {
+      stopReason: "tool_use",
+      content: [
+        {
+          type: "tool_use",
+          id: "toolu_xyz",
+          name: "run_command",
+          input: { command: "npm test" },
+        },
+      ],
+    },
+  ];
+  const provider: ModelProvider = {
+    async chat() {
+      const response = responses.shift();
+      assert.ok(response);
+      return response;
+    },
+  };
+  const policyEngine = new PolicyEngine();
+  policyEngine.addRule({ toolName: "run_command", decide: () => "ask" });
+
+  const controller = new AbortController();
+  // Responder that aborts the signal before resolving, simulating a slow
+  // stream-json consumer that lost its run.
+  const responder = async () => {
+    controller.abort();
+    return true;
+  };
+  const { loop } = createHarness(cwd, provider, {
+    policyEngine,
+    approvalCallback: responder,
+    streamJson: true,
+  });
+
+  try {
+    const { lines } = await captureConsole(() =>
+      loop.run(session, "Run the tests", [], controller.signal)
+    );
+    const events = lines.map(
+      (line) => JSON.parse(line) as { type: string; reason?: string }
+    );
+    const resolved = events.find((event) => event.type === "approval.resolved");
+    assert.ok(resolved, "expected an approval.resolved event");
+    assert.equal(resolved.reason, "aborted");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("run emits approval.resolved with reason=eof when the resolver signals stdin closed", async () => {
+  const cwd = createTempDir();
+  const session = createSession(cwd);
+  const responses: ModelResponse[] = [
+    {
+      stopReason: "tool_use",
+      content: [
+        {
+          type: "tool_use",
+          id: "toolu_eof",
+          name: "run_command",
+          input: { command: "npm test" },
+        },
+      ],
+    },
+    {
+      stopReason: "end_turn",
+      content: [{ type: "text", text: "Skipped." }],
+    },
+  ];
+  const provider: ModelProvider = {
+    async chat() {
+      const response = responses.shift();
+      assert.ok(response);
+      return response;
+    },
+  };
+  const policyEngine = new PolicyEngine();
+  policyEngine.addRule({ toolName: "run_command", decide: () => "ask" });
+
+  // Resolver mimics the stdin responder's EOF behavior: returns a structured
+  // answer that explicitly carries `reason: "eof"` so the executor's audit
+  // event reflects the actual cause instead of a generic "user" denial.
+  const { loop } = createHarness(cwd, provider, {
+    policyEngine,
+    approvalCallback: async () => ({ approved: false, reason: "eof" }),
+    streamJson: true,
+  });
+
+  try {
+    const { lines } = await captureConsole(() =>
+      loop.run(session, "Run the tests")
+    );
+    const events = lines.map(
+      (line) => JSON.parse(line) as {
+        type: string;
+        approved?: boolean;
+        reason?: string;
+      }
+    );
+    const resolved = events.find((event) => event.type === "approval.resolved");
+    assert.ok(resolved, "expected an approval.resolved event");
+    assert.equal(resolved.approved, false);
+    assert.equal(resolved.reason, "eof");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("run wires the stdin responder end-to-end: EOF while pending emits approval.resolved with reason=eof", async () => {
+  // Drives the real createStdinApprovalResponder through the executor so the
+  // audit event reflects the actual EOF path (not a hand-rolled callback).
+  const cwd = createTempDir();
+  const session = createSession(cwd);
+  const responses: ModelResponse[] = [
+    {
+      stopReason: "tool_use",
+      content: [
+        {
+          type: "tool_use",
+          id: "toolu_stdin",
+          name: "run_command",
+          input: { command: "npm test" },
+        },
+      ],
+    },
+    {
+      stopReason: "end_turn",
+      content: [{ type: "text", text: "Skipped." }],
+    },
+  ];
+  const provider: ModelProvider = {
+    async chat() {
+      const response = responses.shift();
+      assert.ok(response);
+      return response;
+    },
+  };
+  const policyEngine = new PolicyEngine();
+  policyEngine.addRule({ toolName: "run_command", decide: () => "ask" });
+
+  const stdin = new PassThrough();
+  const stderr = new PassThrough();
+  const approvalCallback = createStdinApprovalResponder({ input: stdin, stderr });
+
+  const eventStore = new EventStore(path.join(cwd, "events"));
+  const sessionStore = new SessionStore(path.join(cwd, "sessions"));
+  const executor = new Executor(
+    new ToolRegistry(),
+    policyEngine,
+    eventStore,
+    approvalCallback
+  );
+  const loop = new AgentLoop(
+    provider,
+    executor,
+    new ContextBuilder(cwd),
+    new ToolRegistry(),
+    eventStore,
+    sessionStore,
+    true
+  );
+
+  try {
+    const runPromise = captureConsole(() => loop.run(session, "Run the tests"));
+    // Close stdin without sending any response: the responder should resolve
+    // the pending request with reason=eof.
+    setImmediate(() => stdin.end());
+    const { lines } = await runPromise;
+    const events = lines.map(
+      (line) => JSON.parse(line) as {
+        type: string;
+        reason?: string;
+        approved?: boolean;
+      }
+    );
+    const resolved = events.find((event) => event.type === "approval.resolved");
+    assert.ok(resolved, "expected an approval.resolved event");
+    assert.equal(resolved.approved, false);
+    assert.equal(resolved.reason, "eof");
+    approvalCallback.close();
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("run does not print a duplicate human approval prompt in non-stream-json mode", async () => {
+  // The bug: in human mode, the loop's `emit()` for `approval.request` printed
+  // `Allow run_command: npm test? [y/n]`, then askApprovalOn (the actual
+  // readline resolver) printed the same prompt again. After the fix, the
+  // loop is silent on `approval.request` and the resolver owns the prompt UX.
+  // The harness uses a custom approval callback that doesn't print a prompt,
+  // so we can directly assert the loop's contribution: it must not emit the
+  // `Allow …? [y/n]` line in human mode.
+  const cwd = createTempDir();
+  const session = createSession(cwd);
+  const responses: ModelResponse[] = [
+    {
+      stopReason: "tool_use",
+      content: [
+        {
+          type: "tool_use",
+          id: "toolu_human",
+          name: "run_command",
+          input: { command: "npm test" },
+        },
+      ],
+    },
+    {
+      stopReason: "end_turn",
+      content: [{ type: "text", text: "Done." }],
+    },
+  ];
+  const provider: ModelProvider = {
+    async chat() {
+      const response = responses.shift();
+      assert.ok(response);
+      return response;
+    },
+  };
+  const policyEngine = new PolicyEngine();
+  policyEngine.addRule({ toolName: "run_command", decide: () => "ask" });
+
+  const originalLog = console.log;
+  const captured: string[] = [];
+  console.log = (...values: unknown[]) => {
+    captured.push(values.map((value) => String(value)).join(" "));
+  };
+  const { loop } = createHarness(cwd, provider, {
+    policyEngine,
+    approvalCallback: async () => true,
+  });
+  try {
+    await loop.run(session, "Run the tests");
+    const promptCount = captured.filter((line) =>
+      /Allow run_command: npm test\? \[y\/n\]/.test(line)
+    ).length;
+    assert.equal(
+      promptCount,
+      0,
+      `loop must not print the approval prompt in human mode; captured: ${JSON.stringify(captured)}`
+    );
+    // The audit decision line should still appear after the responder returns.
+    assert.ok(
+      captured.some((line) => /\bapproved\b/.test(line)),
+      "expected an `approved` audit line in human mode"
+    );
+  } finally {
+    console.log = originalLog;
     rmSync(cwd, { recursive: true, force: true });
   }
 });

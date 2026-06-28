@@ -3,6 +3,7 @@ import { PassThrough } from "node:stream";
 import test from "node:test";
 
 import { askApprovalOn } from "../src/cli/index.js";
+import type { ApprovalRequest } from "../src/types/approval.js";
 
 function createStreams(): {
   input: PassThrough;
@@ -11,14 +12,24 @@ function createStreams(): {
   return { input: new PassThrough(), output: new PassThrough() };
 }
 
+function makeRequest(
+  overrides: Partial<ApprovalRequest> = {}
+): ApprovalRequest {
+  return {
+    toolCallId: "tool-1",
+    toolName: "run_command",
+    input: { command: "echo hi" },
+    ...overrides,
+  };
+}
+
 test("askApprovalOn resolves false when the signal aborts mid-prompt", async () => {
   const { input, output } = createStreams();
   const controller = new AbortController();
 
   const pending = askApprovalOn(
     { input, output },
-    "run_command",
-    { command: "rm -rf /tmp/important" },
+    makeRequest({ input: { command: "rm -rf /tmp/important" } }),
     controller.signal
   );
 
@@ -41,8 +52,7 @@ test("askApprovalOn resolves false when readline captures a TTY SIGINT", async (
   let capturedRl: import("node:readline").Interface | undefined;
   const pending = askApprovalOn(
     { input, output },
-    "run_command",
-    { command: "rm -rf /tmp/important" },
+    makeRequest({ input: { command: "rm -rf /tmp/important" } }),
     controller.signal,
     {
       onReadline: (rl) => {
@@ -68,8 +78,7 @@ test("askApprovalOn resolves true when the user answers y", async () => {
 
   const pending = askApprovalOn(
     { input, output },
-    "run_command",
-    { command: "echo hi" },
+    makeRequest(),
     controller.signal
   );
 
@@ -87,8 +96,7 @@ test("askApprovalOn resolves false when the user answers n", async () => {
 
   const pending = askApprovalOn(
     { input, output },
-    "run_command",
-    { command: "echo hi" },
+    makeRequest(),
     controller.signal
   );
 
@@ -106,8 +114,7 @@ test("askApprovalOn resolves false when the signal is already aborted", async ()
 
   const approved = await askApprovalOn(
     { input, output },
-    "run_command",
-    { command: "echo hi" },
+    makeRequest(),
     controller.signal
   );
 

@@ -47,6 +47,20 @@ export type StreamEvent =
       metadata?: Record<string, ToolResultMetadata>;
     }
   | {
+      type: "approval.request";
+      id: string;
+      tool: string;
+      input: Record<string, unknown>;
+      timestamp: string;
+    }
+  | {
+      type: "approval.resolved";
+      id: string;
+      approved: boolean;
+      reason: "user" | "aborted" | "eof" | "error";
+      timestamp: string;
+    }
+  | {
       type: "run.completed";
       sessionId: string;
       status: "completed" | "max_iterations";
