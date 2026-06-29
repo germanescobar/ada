@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.0]
+
 ### Added
 
 - **`approval.request` / `approval.resolved` stream events.** Every approval
