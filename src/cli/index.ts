@@ -72,9 +72,12 @@ export function formatModelOptions(
 ): string {
   return groupModelOptions(options)
     .map((group) => {
+      const valueWidth = Math.max(
+        ...group.options.map((option) => option.value.length)
+      );
       const lines = group.options.map(
         (option) =>
-          `  ${option.value.padEnd(38)} ${option.label}${formatCapabilities(option)}`
+          `  ${option.value.padEnd(valueWidth)} ${option.label}${formatCapabilities(option)}`
       );
       return [group.group, ...lines].join("\n");
     })

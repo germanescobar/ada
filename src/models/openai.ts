@@ -22,6 +22,7 @@ type OpenAIUserContentPart =
 interface OpenAIProviderOptions {
   apiKey?: string;
   baseURL?: string;
+  defaultHeaders?: Record<string, string>;
   maxTokens?: number;
   openRouter?: boolean;
 }
@@ -53,6 +54,7 @@ export class OpenAIProvider implements ModelProvider {
     this.client = new OpenAI({
       apiKey: options?.apiKey ?? process.env.OPENAI_API_KEY ?? "not-needed",
       baseURL: options?.baseURL,
+      defaultHeaders: options?.defaultHeaders,
     });
     this.model = model;
     this.maxTokens = options?.maxTokens;

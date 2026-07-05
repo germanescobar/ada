@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  CLOUDFLARE_AI_GATEWAY_MODELS,
   discoverLocalOllamaModelOptions,
   getModelOptions,
   MODEL_OPTIONS,
@@ -110,6 +111,88 @@ test("ollama-cloud requires its own API key", () => {
   );
 });
 
+test("cloudflare-ai-gateway resolves to the OpenAI-compatible REST endpoint", () => {
+  withEnv(
+    {
+      CLOUDFLARE_ACCOUNT_ID: "test-account",
+      CLOUDFLARE_API_TOKEN: "test-cloudflare-token",
+      CLOUDFLARE_AI_GATEWAY_ID: "test-gateway",
+    },
+    () => {
+      assert.deepEqual(
+        resolveProviderConfig(
+          "cloudflare-ai-gateway/@cf/zai-org/glm-4.7-flash"
+        ),
+        {
+          type: "openai-compatible",
+          provider: "cloudflare-ai-gateway",
+          model: "@cf/zai-org/glm-4.7-flash",
+          contextWindowTokens: 131_072,
+          apiKey: "test-cloudflare-token",
+          baseURL:
+            "https://api.cloudflare.com/client/v4/accounts/test-account/ai/v1",
+          defaultHeaders: {
+            "cf-aig-gateway-id": "test-gateway",
+          },
+        }
+      );
+    }
+  );
+});
+
+test("cloudflare-ai-gateway defaults to the default gateway id", () => {
+  withEnv(
+    {
+      CLOUDFLARE_ACCOUNT_ID: "test-account",
+      CLOUDFLARE_API_TOKEN: "test-cloudflare-token",
+      CLOUDFLARE_AI_GATEWAY_ID: undefined,
+    },
+    () => {
+      assert.equal(
+        resolveProviderConfig(
+          "cloudflare-ai-gateway/@cf/zai-org/glm-4.7-flash"
+        ).defaultHeaders?.["cf-aig-gateway-id"],
+        "default"
+      );
+    }
+  );
+});
+
+test("cloudflare-ai-gateway rejects unsupported models", () => {
+  assert.throws(
+    () => resolveProviderConfig("cloudflare-ai-gateway/@cf/qwen/qwen3.5-35b-a3b"),
+    /Unsupported Cloudflare AI Gateway model: "@cf\/qwen\/qwen3\.5-35b-a3b"/
+  );
+});
+
+test("cloudflare-ai-gateway requires Cloudflare credentials", () => {
+  withEnv(
+    { CLOUDFLARE_ACCOUNT_ID: undefined, CLOUDFLARE_API_TOKEN: "token" },
+    () => {
+      assert.throws(
+        () =>
+          resolveProviderConfig(
+            "cloudflare-ai-gateway/@cf/google/gemma-4-26b-a4b-it"
+          ),
+        /CLOUDFLARE_ACCOUNT_ID is required/
+      );
+    }
+  );
+
+  withEnv(
+    { CLOUDFLARE_ACCOUNT_ID: "account", CLOUDFLARE_API_TOKEN: undefined },
+    () => {
+      assert.throws(
+        () =>
+          resolveProviderConfig(
+            "cloudflare-ai-gateway/@cf/google/gemma-4-26b-a4b-it"
+          ),
+        /CLOUDFLARE_API_TOKEN is required/
+      );
+    }
+  );
+});
+
 test("supported OpenAI-compatible providers keep their defaults", () => {
   assert.deepEqual(resolveProviderConfig("ollama/glm-4.7-flash:latest"), {
     type: "openai-compatible",
@@ -142,6 +225,38 @@ test("model context windows are available for compaction budgeting", () => {
   assert.equal(getModelContextWindowTokens("ollama-cloud/glm-5.2"), 976_000);
   assert.equal(
     getModelContextWindowTokens("ollama-cloud/kimi-k2.7-code"),
+    256_000
+  );
+  assert.equal(
+    getModelContextWindowTokens(
+      "cloudflare-ai-gateway/@cf/zai-org/glm-4.7-flash"
+    ),
+    131_072
+  );
+  assert.equal(
+    getModelContextWindowTokens("cloudflare-ai-gateway/@cf/zai-org/glm-5.2"),
+    262_144
+  );
+  assert.equal(
+    getModelContextWindowTokens("cloudflare-ai-gateway/minimax/m3"),
+    1_000_000
+  );
+  assert.equal(
+    getModelContextWindowTokens(
+      "cloudflare-ai-gateway/deepseek/deepseek-v4-pro"
+    ),
+    131_072
+  );
+  assert.equal(
+    getModelContextWindowTokens(
+      "cloudflare-ai-gateway/@cf/moonshotai/kimi-k2.7-code"
+    ),
+    256_000
+  );
+  assert.equal(
+    getModelContextWindowTokens(
+      "cloudflare-ai-gateway/@cf/google/gemma-4-26b-a4b-it"
+    ),
     256_000
   );
   assert.equal(getModelContextWindowTokens("ollama/custom-model"), 128_000);
@@ -184,15 +299,40 @@ test("model capabilities expose supported attachment types", () => {
       files: false,
     },
   });
+  assert.deepEqual(
+    getModelCapabilities(
+      "cloudflare-ai-gateway/@cf/moonshotai/kimi-k2.7-code"
+    ),
+    {
+      attachments: {
+        images: true,
+        files: false,
+      },
+    }
+  );
+  assert.deepEqual(
+    getModelCapabilities(
+      "cloudflare-ai-gateway/@cf/google/gemma-4-26b-a4b-it"
+    ),
+    {
+      attachments: {
+        images: true,
+        files: false,
+      },
+    }
+  );
   assert.deepEqual(getModelCapabilities("ollama/custom-model"), {});
 });
 
-test("model options separate Ollama local and Ollama Cloud choices", () => {
+test("model options separate static provider choices", () => {
   const localOptions = MODEL_OPTIONS.filter(
     (option) => option.group === "Ollama Local"
   );
   const cloudOptions = MODEL_OPTIONS.filter(
     (option) => option.group === "Ollama Cloud"
+  );
+  const cloudflareOptions = MODEL_OPTIONS.filter(
+    (option) => option.group === "Cloudflare AI Gateway"
   );
 
   assert.ok(localOptions.some((option) => option.value.startsWith("ollama/")));
@@ -205,6 +345,20 @@ test("model options separate Ollama local and Ollama Cloud choices", () => {
     "ollama-cloud/minimax-m3",
     "ollama-cloud/deepseek-v4-pro",
     "ollama-cloud/kimi-k2.7-code",
+  ]);
+  assert.deepEqual(
+    cloudflareOptions.map((option) => option.value),
+    CLOUDFLARE_AI_GATEWAY_MODELS.map(
+      (model) => `cloudflare-ai-gateway/${model}`
+    )
+  );
+  assert.deepEqual(cloudflareOptions.map((option) => option.value), [
+    "cloudflare-ai-gateway/@cf/zai-org/glm-4.7-flash",
+    "cloudflare-ai-gateway/@cf/zai-org/glm-5.2",
+    "cloudflare-ai-gateway/minimax/m3",
+    "cloudflare-ai-gateway/deepseek/deepseek-v4-pro",
+    "cloudflare-ai-gateway/@cf/moonshotai/kimi-k2.7-code",
+    "cloudflare-ai-gateway/@cf/google/gemma-4-26b-a4b-it",
   ]);
 });
 

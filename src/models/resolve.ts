@@ -8,6 +8,10 @@ const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 const OLLAMA_DISCOVERY_TIMEOUT_MS = 1_000;
 const OLLAMA_CLOUD_MAX_TOKENS = 8_192;
 const UNKNOWN_MODEL_CONTEXT_WINDOW_TOKENS = 128_000;
+const CLOUDFLARE_GLM_CONTEXT_WINDOW_TOKENS = 131_072;
+const CLOUDFLARE_GLM_5_2_CONTEXT_WINDOW_TOKENS = 262_144;
+const CLOUDFLARE_GEMMA_4_CONTEXT_WINDOW_TOKENS = 256_000;
+const CLOUDFLARE_DEEPSEEK_V4_PRO_CONTEXT_WINDOW_TOKENS = 131_072;
 const GLM_CONTEXT_WINDOW_TOKENS = 198_000;
 const GLM_5_2_CONTEXT_WINDOW_TOKENS = 976_000;
 const DEEPSEEK_V4_PRO_CONTEXT_WINDOW_TOKENS = 1_000_000;
@@ -17,6 +21,13 @@ const MINIMAX_M3_OPENROUTER_CONTEXT_WINDOW_TOKENS = 1_000_000;
 
 interface OllamaCloudModelSpec {
   slug: string;
+  label: string;
+  contextWindowTokens: number;
+  capabilities?: ModelCapabilities;
+}
+
+interface CloudflareAiGatewayModelSpec {
+  model: string;
   label: string;
   contextWindowTokens: number;
   capabilities?: ModelCapabilities;
@@ -51,9 +62,49 @@ export const OLLAMA_CLOUD_MODELS = OLLAMA_CLOUD_MODEL_SPECS.map(
   (spec) => spec.slug
 );
 
+const CLOUDFLARE_AI_GATEWAY_MODEL_SPECS: readonly CloudflareAiGatewayModelSpec[] =
+  [
+    {
+      model: "@cf/zai-org/glm-4.7-flash",
+      label: "GLM 4.7 Flash",
+      contextWindowTokens: CLOUDFLARE_GLM_CONTEXT_WINDOW_TOKENS,
+    },
+    {
+      model: "@cf/zai-org/glm-5.2",
+      label: "GLM 5.2",
+      contextWindowTokens: CLOUDFLARE_GLM_5_2_CONTEXT_WINDOW_TOKENS,
+    },
+    {
+      model: "minimax/m3",
+      label: "MiniMax M3",
+      contextWindowTokens: MINIMAX_M3_OPENROUTER_CONTEXT_WINDOW_TOKENS,
+    },
+    {
+      model: "deepseek/deepseek-v4-pro",
+      label: "DeepSeek V4 Pro",
+      contextWindowTokens: CLOUDFLARE_DEEPSEEK_V4_PRO_CONTEXT_WINDOW_TOKENS,
+    },
+    {
+      model: "@cf/moonshotai/kimi-k2.7-code",
+      label: "Kimi K2.7 Code",
+      contextWindowTokens: KIMI_K2_CONTEXT_WINDOW_TOKENS,
+      capabilities: { attachments: { images: true, files: false } },
+    },
+    {
+      model: "@cf/google/gemma-4-26b-a4b-it",
+      label: "Gemma 4 26B A4B IT",
+      contextWindowTokens: CLOUDFLARE_GEMMA_4_CONTEXT_WINDOW_TOKENS,
+      capabilities: { attachments: { images: true, files: false } },
+    },
+  ];
+
+export const CLOUDFLARE_AI_GATEWAY_MODELS =
+  CLOUDFLARE_AI_GATEWAY_MODEL_SPECS.map((spec) => spec.model);
+
 export type ModelOptionGroupName =
   | "Ollama Local"
   | "Ollama Cloud"
+  | "Cloudflare AI Gateway"
   | "OpenRouter";
 
 export interface ModelOption {
@@ -115,6 +166,13 @@ export const MODEL_OPTIONS: readonly ModelOption[] = [
     contextWindowTokens: spec.contextWindowTokens,
     ...(spec.capabilities ? { capabilities: spec.capabilities } : {}),
   })),
+  ...CLOUDFLARE_AI_GATEWAY_MODEL_SPECS.map((spec): ModelOption => ({
+    label: spec.label,
+    value: `cloudflare-ai-gateway/${spec.model}`,
+    group: "Cloudflare AI Gateway",
+    contextWindowTokens: spec.contextWindowTokens,
+    ...(spec.capabilities ? { capabilities: spec.capabilities } : {}),
+  })),
 ];
 
 export interface ModelOptionGroup {
@@ -140,6 +198,7 @@ export type ProviderConfig =
     contextWindowTokens: number;
     apiKey?: string;
     baseURL?: string;
+    defaultHeaders?: Record<string, string>;
     maxTokens?: number;
     openRouter?: boolean;
   };
@@ -236,6 +295,16 @@ function assertSupportedOllamaCloudModel(model: string): void {
   );
 }
 
+function assertSupportedCloudflareAiGatewayModel(model: string): void {
+  if ((CLOUDFLARE_AI_GATEWAY_MODELS as readonly string[]).includes(model)) {
+    return;
+  }
+
+  throw new Error(
+    `Unsupported Cloudflare AI Gateway model: "${model}". Supported: ${CLOUDFLARE_AI_GATEWAY_MODELS.join(", ")}`
+  );
+}
+
 export function getModelContextWindowTokens(modelString: string): number {
   return (
     MODEL_OPTIONS.find((option) => option.value === modelString)
@@ -301,9 +370,38 @@ export function resolveProviderConfig(modelString: string): ProviderConfig {
         openRouter: true,
       };
 
+    case "cloudflare-ai-gateway": {
+      assertSupportedCloudflareAiGatewayModel(model);
+
+      const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+      if (!accountId) {
+        throw new Error(
+          "CLOUDFLARE_ACCOUNT_ID is required for cloudflare-ai-gateway models. Set CLOUDFLARE_ACCOUNT_ID and try again."
+        );
+      }
+      if (!process.env.CLOUDFLARE_API_TOKEN) {
+        throw new Error(
+          "CLOUDFLARE_API_TOKEN is required for cloudflare-ai-gateway models. Set CLOUDFLARE_API_TOKEN and try again."
+        );
+      }
+
+      return {
+        type: "openai-compatible",
+        provider,
+        model,
+        contextWindowTokens,
+        apiKey: process.env.CLOUDFLARE_API_TOKEN,
+        baseURL: `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/v1`,
+        defaultHeaders: {
+          "cf-aig-gateway-id":
+            process.env.CLOUDFLARE_AI_GATEWAY_ID ?? "default",
+        },
+      };
+    }
+
     default:
       throw new Error(
-        `Unknown provider: "${provider}". Supported: ollama, ollama-cloud, openrouter`
+        `Unknown provider: "${provider}". Supported: ollama, ollama-cloud, openrouter, cloudflare-ai-gateway`
       );
   }
 }
@@ -314,6 +412,7 @@ export function createProvider(modelString: string): ModelProvider {
   return new OpenAIProvider(config.model, {
     apiKey: config.apiKey,
     baseURL: config.baseURL,
+    defaultHeaders: config.defaultHeaders,
     maxTokens: config.maxTokens,
     openRouter: config.openRouter,
   });

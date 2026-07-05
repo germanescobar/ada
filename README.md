@@ -8,7 +8,7 @@ An intelligent AI-powered coding agent that helps you write, edit, and run code.
 - **File System Tools** - Read, write, and edit files seamlessly
 - **Command Execution** - Run shell commands safely with approval prompts
 - **Session Management** - Resume previous conversations and track history
-- **Multi-Provider Support** - Switch between local Ollama, Ollama Cloud, and OpenRouter models
+- **Multi-Provider Support** - Switch between local Ollama, Ollama Cloud, Cloudflare AI Gateway, and OpenRouter models
 - **Event Logging** - Track all interactions and tool executions
 - **Reasoning Capture** - Preserve provider-exposed reasoning traces when available
 - **Type-Safe** - Built with TypeScript for reliability and type safety
@@ -181,6 +181,28 @@ Supported Ollama Cloud models:
 
 Ollama Cloud requests use an explicit `max_tokens` value of 8192 so the provider leaves context room for the prompt.
 
+### Cloudflare AI Gateway
+
+Use the `cloudflare-ai-gateway/` provider for supported Workers AI models routed through Cloudflare AI Gateway.
+
+```bash
+export CLOUDFLARE_ACCOUNT_ID=<your-cloudflare-account-id>
+export CLOUDFLARE_API_TOKEN=<your-cloudflare-api-token>
+export CLOUDFLARE_AI_GATEWAY_ID=<your-gateway-id> # optional, defaults to default
+anita chat "Your message here" --model cloudflare-ai-gateway/@cf/zai-org/glm-4.7-flash
+```
+
+Supported Cloudflare AI Gateway models matched from the Ollama local and Ollama Cloud model lists:
+
+- `cloudflare-ai-gateway/@cf/zai-org/glm-4.7-flash`
+- `cloudflare-ai-gateway/@cf/zai-org/glm-5.2`
+- `cloudflare-ai-gateway/minimax/m3`
+- `cloudflare-ai-gateway/deepseek/deepseek-v4-pro`
+- `cloudflare-ai-gateway/@cf/moonshotai/kimi-k2.7-code` `[images]`
+- `cloudflare-ai-gateway/@cf/google/gemma-4-26b-a4b-it` `[images]`
+
+The local `qwen3.5:35b-a3b-coding-nvfp4` model is not listed because Cloudflare's Workers AI catalog does not currently expose that exact model.
+
 ### JSON Event Streaming
 
 Use `--stream-json` to emit one JSON event per line for machine-readable integrations:
@@ -336,12 +358,18 @@ Available providers (provider/model format):
 - `ollama-cloud/minimax-m3`
 - `ollama-cloud/deepseek-v4-pro`
 - `ollama-cloud/kimi-k2.7-code`
+- `cloudflare-ai-gateway/@cf/zai-org/glm-4.7-flash`
+- `cloudflare-ai-gateway/@cf/zai-org/glm-5.2`
+- `cloudflare-ai-gateway/minimax/m3`
+- `cloudflare-ai-gateway/deepseek/deepseek-v4-pro`
+- `cloudflare-ai-gateway/@cf/moonshotai/kimi-k2.7-code`
+- `cloudflare-ai-gateway/@cf/google/gemma-4-26b-a4b-it`
 - `openrouter/z-ai/glm-5.1`
 - `openrouter/minimax/minimax-m3`
 - `openrouter/deepseek/deepseek-v4-pro`
 - `openrouter/moonshotai/kimi-k2.6`
 
-`ollama/<local-model>` targets `http://localhost:11434/v1`. `ollama-cloud/<model>` targets Ollama Cloud and uses `OLLAMA_API_KEY`. `openrouter/<model>` targets OpenRouter and uses `OPENROUTER_API_KEY`.
+`ollama/<local-model>` targets `http://localhost:11434/v1`. `ollama-cloud/<model>` targets Ollama Cloud and uses `OLLAMA_API_KEY`. `cloudflare-ai-gateway/<model>` targets Cloudflare AI Gateway and uses `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`, and optional `CLOUDFLARE_AI_GATEWAY_ID`. `openrouter/<model>` targets OpenRouter and uses `OPENROUTER_API_KEY`.
 
 ## Configuration
 
