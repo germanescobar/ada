@@ -13,12 +13,31 @@ test("formatModelOptions lists models grouped by provider", () => {
 
   assert.match(output, /^Ollama Local\n/m);
   assert.match(output, /^Ollama Cloud\n/m);
+  assert.match(output, /^Cloudflare AI Gateway\n/m);
   assert.match(output, /^OpenRouter\n/m);
   assert.doesNotMatch(output, /^Anthropic\n/m);
   assert.doesNotMatch(output, /^OpenAI\n/m);
   assert.match(output, /ollama\/glm-4\.7-flash:latest\s+GLM 4\.7 Flash/);
   assert.match(output, /ollama-cloud\/glm-5\.2\s+GLM 5\.2/);
   assert.match(output, /ollama-cloud\/minimax-m3\s+MiniMax M3 \[images, files\]/);
+  assert.match(
+    output,
+    /cloudflare-ai-gateway\/@cf\/zai-org\/glm-4\.7-flash\s+GLM 4\.7 Flash/
+  );
+  assert.match(output, /cloudflare-ai-gateway\/@cf\/zai-org\/glm-5\.2\s+GLM 5\.2/);
+  assert.match(output, /cloudflare-ai-gateway\/minimax\/m3\s+MiniMax M3/);
+  assert.match(
+    output,
+    /cloudflare-ai-gateway\/deepseek\/deepseek-v4-pro\s+DeepSeek V4 Pro/
+  );
+  assert.match(
+    output,
+    /cloudflare-ai-gateway\/@cf\/moonshotai\/kimi-k2\.7-code\s+Kimi K2\.7 Code \[images\]/
+  );
+  assert.match(
+    output,
+    /cloudflare-ai-gateway\/@cf\/google\/gemma-4-26b-a4b-it\s+Gemma 4 26B A4B IT \[images\]/
+  );
   assert.match(output, /openrouter\/minimax\/minimax-m3\s+MiniMax M3 \[images, files\]/);
   assert.match(output, /ollama-cloud\/deepseek-v4-pro\s+DeepSeek V4 Pro/);
   assert.match(output, /ollama-cloud\/kimi-k2\.7-code\s+Kimi K2\.7 Code \[images\]/);
