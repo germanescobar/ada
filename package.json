@@ -1,6 +1,6 @@
 {
   "name": "@germanescobar/anita",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "An intelligent AI-powered coding agent that helps you write, edit, and run code with conversational access to AI models and your file system.",
   "type": "module",
   "files": [

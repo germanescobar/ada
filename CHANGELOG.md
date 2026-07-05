@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.0]
+
+### Added
+
+- **Cloudflare AI Gateway provider.** Added `cloudflare-ai-gateway/` as an
+  OpenAI-compatible provider configured with `CLOUDFLARE_ACCOUNT_ID`,
+  `CLOUDFLARE_API_TOKEN`, and optional `CLOUDFLARE_AI_GATEWAY_ID`.
+- **Cloudflare model options.** Added supported Cloudflare model choices that
+  match the Ollama local and Ollama Cloud model lists, including GLM, MiniMax,
+  DeepSeek, Kimi, and Gemma variants.
+
+### Changed
+
+- Model listing output now sizes provider/model columns dynamically so long
+  Cloudflare model identifiers remain readable.
+
 ## [0.4.0]
 
 ### Added
