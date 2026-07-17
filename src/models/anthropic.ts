@@ -30,6 +30,7 @@ export class AnthropicProvider implements ModelProvider {
 
     return {
       stopReason: this.mapStopReason(response.stop_reason),
+      providerStopReason: response.stop_reason ?? undefined,
       content: response.content.map((block) => this.fromAnthropicBlock(block)),
       usage: {
         inputTokens: response.usage.input_tokens,
@@ -65,6 +66,7 @@ export class AnthropicProvider implements ModelProvider {
         }
     >();
     let stopReason: StopReason = "end_turn";
+    let providerStopReason: string | undefined;
     let inputTokens = 0;
     let outputTokens = 0;
 
@@ -76,6 +78,7 @@ export class AnthropicProvider implements ModelProvider {
           break;
         case "message_delta":
           stopReason = this.mapStopReason(event.delta.stop_reason);
+          providerStopReason = event.delta.stop_reason ?? undefined;
           outputTokens = event.usage.output_tokens;
           break;
         case "content_block_start": {
@@ -141,6 +144,7 @@ export class AnthropicProvider implements ModelProvider {
       type: "response",
       response: {
         stopReason,
+        ...(providerStopReason ? { providerStopReason } : {}),
         content,
         usage: {
           inputTokens,

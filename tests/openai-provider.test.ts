@@ -48,7 +48,10 @@ async function* streamChunks(
   }
 }
 
-function createTextChunk(text: string): ChatCompletionChunk {
+function createTextChunk(
+  text: string,
+  finishReason: ChatCompletionChunk["choices"][number]["finish_reason"] = null
+): ChatCompletionChunk {
   return {
     id: "chunk-1",
     created: 1,
@@ -58,7 +61,7 @@ function createTextChunk(text: string): ChatCompletionChunk {
       {
         index: 0,
         delta: { content: text },
-        finish_reason: null,
+        finish_reason: finishReason,
       },
     ],
   };
@@ -80,7 +83,8 @@ function createUsageChunk(usage?: UsageWithCacheDetails): ChatCompletionChunk {
 }
 
 function createCompletion(
-  usage?: UsageWithCacheDetails
+  usage?: UsageWithCacheDetails,
+  finishReason: OpenAI.Chat.Completions.ChatCompletion.Choice["finish_reason"] = "stop"
 ): OpenAI.Chat.Completions.ChatCompletion {
   return {
     id: "completion-1",
@@ -91,7 +95,7 @@ function createCompletion(
     choices: [
       {
         index: 0,
-        finish_reason: "stop",
+        finish_reason: finishReason,
         logprobs: null,
         message: {
           role: "assistant",
@@ -211,6 +215,36 @@ test("OpenAIProvider.chat preserves cache usage details", async () => {
     outputTokens: 30,
     cachedTokens: 100,
     cacheWriteTokens: 20,
+  });
+});
+
+test("OpenAIProvider.chat maps length finish_reason to max_tokens and preserves provider reason", async () => {
+  const provider = new OpenAIProvider("test-model");
+
+  setClient(provider, {
+    chat: {
+      completions: {
+        async create() {
+          return createCompletion(
+            {
+              prompt_tokens: 100,
+              completion_tokens: 8192,
+              total_tokens: 8292,
+            },
+            "length"
+          );
+        },
+      },
+    },
+  });
+
+  const response = await provider.chat(createParams());
+
+  assert.equal(response.stopReason, "max_tokens");
+  assert.equal(response.providerStopReason, "length");
+  assert.deepEqual(response.usage, {
+    inputTokens: 100,
+    outputTokens: 8192,
   });
 });
 
@@ -348,6 +382,36 @@ test("OpenAIProvider.streamChat requests and preserves stream usage", async () =
         cachedTokens: 8,
         cacheWriteTokens: 2,
       },
+    },
+  });
+});
+
+test("OpenAIProvider.streamChat preserves provider finish reason", async () => {
+  const provider = new OpenAIProvider("test-model");
+
+  setClient(provider, {
+    chat: {
+      completions: {
+        async create() {
+          return streamChunks([createTextChunk("Too long", "length")]);
+        },
+      },
+    },
+  });
+
+  const events = [];
+  for await (const event of provider.streamChat(createParams())) {
+    events.push(event);
+  }
+
+  assert.deepEqual(events.at(-1), {
+    type: "response",
+    response: {
+      stopReason: "max_tokens",
+      providerStopReason: "length",
+      content: [{ type: "text", text: "Too long" }],
+      reasoning: undefined,
+      usage: undefined,
     },
   });
 });

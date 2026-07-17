@@ -65,6 +65,7 @@ export type StreamEvent =
       sessionId: string;
       status: "completed" | "max_iterations";
       stopReason: StopReason;
+      providerStopReason?: string;
       timestamp: string;
     }
   | {
