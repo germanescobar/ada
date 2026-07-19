@@ -6,6 +6,20 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.1]
+
+### Fixed
+
+- Preserve provider-native finish reasons in stored assistant responses and
+  `run.completed` stream events so output-token caps and provider stops are
+  diagnosable.
+- Surface max-token stops in human-readable CLI output.
+- Store structured provider error details, including status, request id, SDK
+  error body, and plain-text response bodies embedded in SDK messages.
+- Read the CLI version from `package.json` instead of a hardcoded value.
+- Convert deprecated OpenAI-compatible `message.function_call` completions into
+  tool-use blocks to avoid retrying until the iteration cap.
+
 ## [0.5.0]
 
 ### Added
