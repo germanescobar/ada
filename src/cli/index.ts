@@ -1,7 +1,8 @@
 import readline from "node:readline";
 import fs from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import chalk from "chalk";
 import { Command } from "commander";
 
@@ -26,6 +27,7 @@ import {
 } from "../agent/loop.js";
 import { SessionManager } from "../agent/session.js";
 import { loadAttachments } from "../attachments.js";
+import { serializeError } from "../errors.js";
 import {
   createProvider,
   getModelCapabilities,
@@ -38,6 +40,7 @@ import {
 import { loadSkills, type Skill } from "../skills/skills.js";
 
 const DEFAULT_MODEL = "ollama/glm-4.7-flash:latest";
+const CLI_VERSION = readPackageVersion();
 const AGENTS_TEMPLATE = `# AGENTS.md
 
 Describe the coding guidelines, project conventions, and operational constraints Anita should follow.
@@ -65,6 +68,25 @@ function resolveStorageBase(cwd: string): string {
   if (existsSync(path.join(legacy, "sessions"))) return legacy;
 
   return primary;
+}
+
+function readPackageVersion(): string {
+  const packagePath = path.join(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "..",
+    "..",
+    "package.json"
+  );
+  const parsed: unknown = JSON.parse(readFileSync(packagePath, "utf8"));
+  if (
+    typeof parsed === "object" &&
+    parsed !== null &&
+    "version" in parsed &&
+    typeof parsed.version === "string"
+  ) {
+    return parsed.version;
+  }
+  throw new Error(`Unable to read package version from ${packagePath}`);
 }
 
 export function formatModelOptions(
@@ -354,7 +376,7 @@ export function createCLI() {
   program
     .name("anita")
     .description("An AI coding agent")
-    .version("0.3.0")
+    .version(CLI_VERSION)
     .option("--model <model>", "Model to use (provider/model)", DEFAULT_MODEL)
     .option("--system-prompt <prompt>", "Additional system prompt instructions")
     .option("--stream-json", "Emit structured JSON events to stdout")
@@ -550,13 +572,15 @@ export function createCLI() {
       try {
         await loop.run(session, message, attachments, abortController.signal);
       } catch (err) {
-        const errorMessage = (err as Error).message;
+        const serializedError = serializeError(err);
+        const errorMessage = serializedError.message;
         if (streamJson) {
           console.log(
             JSON.stringify({
               type: "run.failed",
               sessionId: session.id,
               error: errorMessage,
+              errorDetails: serializedError,
               timestamp: new Date().toISOString(),
             })
           );

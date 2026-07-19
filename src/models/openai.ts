@@ -87,11 +87,11 @@ export class OpenAIProvider implements ModelProvider {
     }
 
     const content = this.fromOpenAIMessage(choice.message);
-    const stopReason =
-      choice.finish_reason === "tool_calls" ? "tool_use" : "end_turn";
+    const stopReason = this.mapFinishReason(choice.finish_reason);
 
     return {
       stopReason,
+      providerStopReason: choice.finish_reason ?? undefined,
       content,
       reasoning: this.extractReasoning(choice.message),
       usage: response.usage
@@ -123,6 +123,7 @@ export class OpenAIProvider implements ModelProvider {
     let text = "";
     let reasoning = "";
     let stopReason: StopReason = "end_turn";
+    let providerStopReason: string | undefined;
     let usage: ModelResponse["usage"] | undefined;
     const toolCalls = new Map<
       number,
@@ -169,6 +170,7 @@ export class OpenAIProvider implements ModelProvider {
 
       if (choice.finish_reason) {
         stopReason = this.mapFinishReason(choice.finish_reason);
+        providerStopReason = choice.finish_reason;
       }
     }
 
@@ -191,6 +193,7 @@ export class OpenAIProvider implements ModelProvider {
       type: "response",
       response: {
         stopReason,
+        ...(providerStopReason ? { providerStopReason } : {}),
         content,
         reasoning: reasoning || undefined,
         usage,
@@ -374,6 +377,7 @@ export class OpenAIProvider implements ModelProvider {
     message: OpenAI.Chat.Completions.ChatCompletionMessage
   ): ContentBlock[] {
     const blocks: ContentBlock[] = [];
+    const legacyFunctionCall = this.getLegacyFunctionCall(message);
 
     if (message.content) {
       blocks.push({ type: "text", text: message.content });
@@ -390,7 +394,43 @@ export class OpenAIProvider implements ModelProvider {
       }
     }
 
+    if (legacyFunctionCall) {
+      blocks.push({
+        type: "tool_use",
+        id: "legacy_function_call",
+        name: legacyFunctionCall.name,
+        input: this.parseToolArguments(legacyFunctionCall.arguments),
+      });
+    }
+
     return blocks;
+  }
+
+  private getLegacyFunctionCall(
+    message: OpenAI.Chat.Completions.ChatCompletionMessage
+  ): { name: string; arguments: string } | undefined {
+    const candidate = (
+      message as OpenAI.Chat.Completions.ChatCompletionMessage & {
+        function_call?: unknown;
+      }
+    ).function_call;
+
+    if (
+      typeof candidate !== "object" ||
+      candidate === null ||
+      !("name" in candidate) ||
+      typeof candidate.name !== "string"
+    ) {
+      return undefined;
+    }
+
+    return {
+      name: candidate.name,
+      arguments:
+        "arguments" in candidate && typeof candidate.arguments === "string"
+          ? candidate.arguments
+          : "",
+    };
   }
 
   private extractReasoning(

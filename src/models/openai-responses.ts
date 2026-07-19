@@ -408,11 +408,18 @@ export function responseToModelResponse(
 
   return {
     stopReason,
+    providerStopReason: getProviderStopReason(response),
     content,
     reasoning,
     reasoningItems: reasoningItems.length > 0 ? reasoningItems : undefined,
     usage,
   };
+}
+
+function getProviderStopReason(response: OpenAI.Responses.Response): string {
+  const status = response.status ?? "unknown";
+  const incompleteReason = response.incomplete_details?.reason;
+  return incompleteReason ? `${status}:${incompleteReason}` : status;
 }
 
 export function mapStopReason(

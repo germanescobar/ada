@@ -15,6 +15,7 @@ import {
 } from "../types/conversation.js";
 import type { AttachmentContentBlock, ContentBlock } from "../types/messages.js";
 import type { StreamEvent } from "../types/stream.js";
+import { serializeError } from "../errors.js";
 import { ContextBuilder } from "./context-builder.js";
 import { Executor } from "./executor.js";
 import type {
@@ -140,6 +141,7 @@ export class AgentLoop {
       // context is refreshed per turn.
       const baseSystemPrompt = this.contextBuilder.buildSystemPrompt();
       let finalStopReason = "max_iterations";
+      let finalProviderStopReason: string | undefined;
       let status: "completed" | "max_iterations" = "max_iterations";
       // Track the last logged system prompt so the model_request event is only
       // written when the assembled prompt (including runtime context) changes.
@@ -188,6 +190,7 @@ export class AgentLoop {
 
         await this.eventStore.append(session.id, "assistant_response", {
           stopReason: response.stopReason,
+          providerStopReason: response.providerStopReason,
           content: response.content,
           reasoning: response.reasoning,
           usage: response.usage,
@@ -215,6 +218,7 @@ export class AgentLoop {
 
         // If no tool use, we're done
         finalStopReason = response.stopReason;
+        finalProviderStopReason = response.providerStopReason;
         if (response.stopReason !== "tool_use") {
           session.conversationItems.push(...assistantItems);
           await this.saveSession(session);
@@ -337,6 +341,7 @@ export class AgentLoop {
         sessionId: session.id,
         status,
         stopReason: finalStopReason as "end_turn" | "tool_use" | "max_tokens" | "error",
+        providerStopReason: finalProviderStopReason,
         timestamp: new Date().toISOString(),
       });
     } catch (err) {
@@ -351,8 +356,9 @@ export class AgentLoop {
         // Preserve the original run failure.
       }
       try {
+        const serializedError = serializeError(err);
         await this.eventStore.append(session.id, "error", {
-          message: err instanceof Error ? err.message : String(err),
+          ...serializedError,
         });
       } catch {
         // Preserve the original run failure.
@@ -724,6 +730,18 @@ export class AgentLoop {
       case "run.started":
         return;
       case "run.completed":
+        this.finishPendingTerminalDelta();
+        if (event.stopReason === "max_tokens") {
+          const providerDetail = event.providerStopReason
+            ? ` Provider finish reason: ${event.providerStopReason}.`
+            : "";
+          console.log(
+            chalk.yellow(
+              `Run stopped because the model hit its output-token limit.${providerDetail}`
+            )
+          );
+        }
+        return;
       case "run.failed":
         this.finishPendingTerminalDelta();
         return;

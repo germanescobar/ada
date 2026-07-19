@@ -124,6 +124,80 @@ test("run saves the user message before model failure", async () => {
   }
 });
 
+test("run logs structured API error details", async () => {
+  const cwd = createTempDir();
+  const session = createSession(cwd);
+  const provider: ModelProvider = {
+    async chat() {
+      throw Object.assign(
+        new Error('500 "Internal Server Error (ref: b50f5355)"'),
+        {
+          status: 500,
+          request_id: "req_500",
+        }
+      );
+    },
+  };
+  const { loop, eventStore } = createLoop(cwd, provider);
+
+  try {
+    await assert.rejects(
+      silenceConsole(() => loop.run(session, "Please inspect the project")),
+      /Internal Server Error/
+    );
+
+    const events = await eventStore.getEvents(session.id);
+    const errorEvent = events.find((event) => event.type === "error");
+    assert.ok(errorEvent);
+    assert.equal(
+      errorEvent.data.message,
+      '500 "Internal Server Error (ref: b50f5355)"'
+    );
+    assert.equal(errorEvent.data.status, 500);
+    assert.equal(errorEvent.data.requestId, "req_500");
+    assert.equal(errorEvent.data.body, "Internal Server Error (ref: b50f5355)");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("run logs provider stop reason for max-token responses", async () => {
+  const cwd = createTempDir();
+  const session = createSession(cwd);
+  const provider: ModelProvider = {
+    async chat() {
+      return {
+        stopReason: "max_tokens",
+        providerStopReason: "length",
+        content: [{ type: "text", text: "partial response" }],
+        usage: {
+          inputTokens: 100,
+          outputTokens: 8192,
+        },
+      };
+    },
+  };
+  const { loop, eventStore } = createLoop(cwd, provider);
+
+  try {
+    await silenceConsole(() => loop.run(session, "Please inspect the project"));
+
+    const events = await eventStore.getEvents(session.id);
+    const assistantResponse = events.find(
+      (event) => event.type === "assistant_response"
+    );
+    assert.ok(assistantResponse);
+    assert.equal(assistantResponse.data.stopReason, "max_tokens");
+    assert.equal(assistantResponse.data.providerStopReason, "length");
+    assert.deepEqual(assistantResponse.data.usage, {
+      inputTokens: 100,
+      outputTokens: 8192,
+    });
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test("run saves assistant responses and tool-result batches before later failure", async () => {
   const cwd = createTempDir();
   const session = createSession(cwd);
