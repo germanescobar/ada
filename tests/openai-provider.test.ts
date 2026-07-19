@@ -520,3 +520,52 @@ test("OpenAIProvider.chat normalizes non-object tool_call arguments to empty inp
     );
   }
 });
+
+test("OpenAIProvider.chat converts deprecated function_call completions to tool use", async () => {
+  const provider = new OpenAIProvider("test-model");
+  const completion: OpenAI.Chat.Completions.ChatCompletion = {
+    id: "completion-1",
+    created: 1,
+    model: "test-model",
+    object: "chat.completion",
+    choices: [
+      {
+        index: 0,
+        finish_reason: "function_call",
+        logprobs: null,
+        message: {
+          role: "assistant",
+          content: null,
+          refusal: null,
+          function_call: {
+            name: "run_command",
+            arguments: '{"command":"git status"}',
+          },
+        } as OpenAI.Chat.Completions.ChatCompletionMessage,
+      },
+    ],
+  };
+
+  setClient(provider, {
+    chat: {
+      completions: {
+        async create() {
+          return completion;
+        },
+      },
+    },
+  });
+
+  const result = await provider.chat(createParams());
+
+  assert.equal(result.stopReason, "tool_use");
+  assert.equal(result.providerStopReason, "function_call");
+  assert.deepEqual(result.content, [
+    {
+      type: "tool_use",
+      id: "legacy_function_call",
+      name: "run_command",
+      input: { command: "git status" },
+    },
+  ]);
+});

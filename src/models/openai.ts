@@ -377,6 +377,7 @@ export class OpenAIProvider implements ModelProvider {
     message: OpenAI.Chat.Completions.ChatCompletionMessage
   ): ContentBlock[] {
     const blocks: ContentBlock[] = [];
+    const legacyFunctionCall = this.getLegacyFunctionCall(message);
 
     if (message.content) {
       blocks.push({ type: "text", text: message.content });
@@ -393,7 +394,43 @@ export class OpenAIProvider implements ModelProvider {
       }
     }
 
+    if (legacyFunctionCall) {
+      blocks.push({
+        type: "tool_use",
+        id: "legacy_function_call",
+        name: legacyFunctionCall.name,
+        input: this.parseToolArguments(legacyFunctionCall.arguments),
+      });
+    }
+
     return blocks;
+  }
+
+  private getLegacyFunctionCall(
+    message: OpenAI.Chat.Completions.ChatCompletionMessage
+  ): { name: string; arguments: string } | undefined {
+    const candidate = (
+      message as OpenAI.Chat.Completions.ChatCompletionMessage & {
+        function_call?: unknown;
+      }
+    ).function_call;
+
+    if (
+      typeof candidate !== "object" ||
+      candidate === null ||
+      !("name" in candidate) ||
+      typeof candidate.name !== "string"
+    ) {
+      return undefined;
+    }
+
+    return {
+      name: candidate.name,
+      arguments:
+        "arguments" in candidate && typeof candidate.arguments === "string"
+          ? candidate.arguments
+          : "",
+    };
   }
 
   private extractReasoning(
