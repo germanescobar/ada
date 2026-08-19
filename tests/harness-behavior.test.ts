@@ -512,6 +512,188 @@ test("repeated compaction folds existing summary into model-generated summary", 
   }
 });
 
+test("compaction skips safely when summarizer returns no text on first attempt", async () => {
+  // Regression test for issue #80: an empty summarizer response must not abort
+  // the run. The first attempt returns no text; the retry's `NONE` sentinel
+  // signals "nothing to add" cleanly, so the loop should fall back to the
+  // uncompacted transcript and emit a `summarizer_returned_empty` skip event.
+  const cwd = createTempDir();
+  const oldMessages: Message[] = [
+    { role: "user", content: "Old request " + "a".repeat(160) },
+    {
+      role: "assistant",
+      content: [{ type: "text", text: "Old answer " + "b".repeat(160) }],
+    },
+    { role: "user", content: "Recent request " + "c".repeat(160) },
+    {
+      role: "assistant",
+      content: [{ type: "text", text: "Recent answer " + "d".repeat(160) }],
+    },
+  ];
+  const session = createSession(cwd, oldMessages);
+  const requests: ChatParams[] = [];
+  const provider: ModelProvider = {
+    async chat(request) {
+      requests.push(request);
+      if (request.systemPrompt.includes("rolling summary")) {
+        // First summarizer call: empty response (refusal/tool-only/quota).
+        // The retry should then receive the `NONE` sentinel and return it.
+        const isRetry = /literal token NONE/.test(request.systemPrompt);
+        return {
+          stopReason: "end_turn",
+          content: isRetry ? [{ type: "text", text: "NONE" }] : [],
+        };
+      }
+      return {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "Done" }],
+      };
+    },
+  };
+  const { loop, eventStore, sessionStore } = createHarness(cwd, provider, {
+    contextBudget: {
+      compactAtRatio: 0.8,
+      reservedResponseTokens: 127_900,
+      keepRecentTokens: 80,
+      minSummarizableTokens: 20,
+      targetSummaryTokens: 100,
+    },
+  });
+
+  try {
+    await silenceConsole(() => loop.run(session, "Current request"));
+
+    // Two summarizer calls (first empty, retry with `NONE`), then the model
+    // call receives the uncompacted transcript.
+    assert.equal(requests.length, 3);
+    assert.match(requests[0].systemPrompt, /rolling summary/);
+    assert.equal(requests[0].messages.length, 1);
+    assert.doesNotMatch(
+      JSON.stringify(requests[0].messages[0].content),
+      /literal token NONE/
+    );
+    assert.match(requests[1].systemPrompt, /literal token NONE/);
+    // Final model call receives the uncompacted transcript plus the user turn.
+    assert.doesNotMatch(
+      JSON.stringify(requests[2].messages),
+      /Previous conversation summary/
+    );
+    assert.deepEqual(requests[2].messages.at(-1), {
+      role: "user",
+      content: "Current request",
+    });
+
+    const events = await eventStore.getEvents(session.id);
+    assert.equal(events[1].type, "conversation_compaction");
+    assert.equal(events[1].data.summarizedMessages, 0);
+    assert.equal(events[1].data.skipReason, "summarizer_returned_empty");
+    assert.equal(events[1].data.attempts, 2);
+    assert.ok(events[1].data.diagnostics);
+    assert.equal(events[1].data.diagnostics.firstAttempt.contentBlockCount, 0);
+    assert.equal(events[1].data.diagnostics.firstAttempt.textBlockCount, 0);
+    assert.ok(events[1].data.diagnostics.retryAttempt);
+    assert.equal(
+      events[1].data.diagnostics.retryAttempt.contentBlockCount,
+      1
+    );
+    assert.equal(events[1].data.diagnostics.retryAttempt.textBlockCount, 1);
+
+    const saved = await sessionStore.load(session.id);
+    assert.ok(saved);
+    // Compaction was skipped, so no rolling summary should be persisted and
+    // the turn must still complete normally.
+    assert.equal(saved.contextBudget?.compactionSummary, undefined);
+    assert.deepEqual(saved.messages.at(-1), {
+      role: "assistant",
+      content: [{ type: "text", text: "Done" }],
+    });
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("compaction skips safely when summarizer returns empty text twice", async () => {
+  // Both summarizer attempts return no text (e.g. provider quota, content
+  // filter). The loop must still complete the user's turn instead of throwing
+  // and emitting `run.failed`.
+  const cwd = createTempDir();
+  const oldMessages: Message[] = [
+    { role: "user", content: "Old request " + "a".repeat(160) },
+    {
+      role: "assistant",
+      content: [{ type: "text", text: "Old answer " + "b".repeat(160) }],
+    },
+    { role: "user", content: "Recent request " + "c".repeat(160) },
+    {
+      role: "assistant",
+      content: [{ type: "text", text: "Recent answer " + "d".repeat(160) }],
+    },
+  ];
+  const session = createSession(cwd, oldMessages);
+  const requests: ChatParams[] = [];
+  let summarizerCalls = 0;
+  const provider: ModelProvider = {
+    async chat(request) {
+      requests.push(request);
+      if (request.systemPrompt.includes("rolling summary")) {
+        summarizerCalls += 1;
+        // Whitespace-only on the first call, empty content on the retry.
+        return {
+          stopReason: summarizerCalls === 1 ? "length" : "end_turn",
+          content:
+            summarizerCalls === 1
+              ? [{ type: "text", text: "   \n  " }]
+              : [],
+        };
+      }
+      return {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "Done" }],
+      };
+    },
+  };
+  const { loop, eventStore, sessionStore } = createHarness(cwd, provider, {
+    contextBudget: {
+      compactAtRatio: 0.8,
+      reservedResponseTokens: 127_900,
+      keepRecentTokens: 80,
+      minSummarizableTokens: 20,
+      targetSummaryTokens: 100,
+    },
+  });
+
+  try {
+    await silenceConsole(() => loop.run(session, "Current request"));
+
+    assert.equal(summarizerCalls, 2);
+    assert.equal(requests.length, 3);
+
+    const events = await eventStore.getEvents(session.id);
+    assert.equal(events[1].type, "conversation_compaction");
+    assert.equal(events[1].data.summarizedMessages, 0);
+    assert.equal(events[1].data.skipReason, "summarizer_returned_empty");
+    assert.equal(events[1].data.attempts, 2);
+    // The second (fatal) attempt's diagnostics are what should surface to
+    // operators, including its finish reason and the empty content blocks.
+    assert.equal(events[1].data.diagnostics.retryAttempt.stopReason, "end_turn");
+    assert.equal(
+      events[1].data.diagnostics.retryAttempt.contentBlockCount,
+      0
+    );
+    assert.equal(events[1].data.diagnostics.retryAttempt.textBlockCount, 0);
+
+    const saved = await sessionStore.load(session.id);
+    assert.ok(saved);
+    assert.equal(saved.contextBudget?.compactionSummary, undefined);
+    assert.deepEqual(saved.messages.at(-1), {
+      role: "assistant",
+      content: [{ type: "text", text: "Done" }],
+    });
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test("policy-denied tool calls are returned as error tool results", async () => {
   const cwd = createTempDir();
   const session = createSession(cwd);

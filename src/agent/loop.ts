@@ -1,5 +1,9 @@
 import chalk from "chalk";
-import type { ModelProvider, ModelStreamEvent } from "../models/provider.js";
+import type {
+  ChatParams,
+  ModelProvider,
+  ModelStreamEvent,
+} from "../models/provider.js";
 import { getModelContextWindowTokens } from "../models/resolve.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { EventStore } from "../storage/event-store.js";
@@ -45,6 +49,47 @@ export interface ContextBudgetOptions {
   keepRecentTokens: number;
   minSummarizableTokens: number;
   targetSummaryTokens: number;
+}
+
+/**
+ * Per-attempt diagnostics for the summarizer call. Captured so that a
+ * `summarizer_returned_empty` skip event has enough metadata for operators
+ * to tell a misconfigured summarizer apart from a transient provider hiccup.
+ */
+export interface SummarizerAttemptDiagnostics {
+  contentBlockCount: number;
+  textBlockCount: number;
+  stopReason: string;
+  providerStopReason?: string;
+}
+
+export interface CompactionSummaryResult {
+  kind: "summary" | "empty";
+  /** Present only when `kind === "summary"`. */
+  text?: string;
+  /**
+   * `1` when the first attempt produced a usable summary; `2` when either a
+   * retry was needed (summary succeeded on retry) or both attempts failed
+   * (caller falls back to a skip).
+   */
+  attempts: 1 | 2;
+  diagnostics: SummarizerDiagnostics;
+}
+
+export interface SummarizerDiagnostics {
+  firstAttempt: SummarizerAttemptDiagnostics;
+  retryAttempt?: SummarizerAttemptDiagnostics;
+}
+
+/**
+ * Per-attempt result from `runSummarizerRequest`. `generateCompactionSummary`
+ * composes these into a {@link CompactionSummaryResult} that tracks whether
+ * a retry was needed.
+ */
+export interface CompactionSummaryAttempt {
+  kind: "summary" | "empty";
+  text?: string;
+  diagnostics: SummarizerAttemptDiagnostics;
 }
 
 export class AgentLoop {
@@ -453,10 +498,24 @@ export class AgentLoop {
       return currentModelItems;
     }
 
-    const summary = await this.generateCompactionSummary(
+    const summaryResult = await this.generateCompactionSummary(
       existingSummary,
       nextItemsToSummarize
     );
+    if (summaryResult.kind === "empty") {
+      await this.appendCompactionSkipEvent(
+        session,
+        beforeTokens,
+        currentModelItems,
+        "summarizer_returned_empty",
+        {
+          attempts: summaryResult.attempts,
+          diagnostics: summaryResult.diagnostics,
+        }
+      );
+      return currentModelItems;
+    }
+    const summary = summaryResult.text ?? "";
     const recentItems = session.conversationItems.slice(splitIndex);
     const compactedItems = this.buildCompactedItems(summary, recentItems);
     const afterTokens = this.estimateConversationTokens(compactedItems);
@@ -533,43 +592,98 @@ export class AgentLoop {
   private async generateCompactionSummary(
     existingSummary: string | undefined,
     items: ConversationItem[]
-  ): Promise<string> {
+  ): Promise<CompactionSummaryResult> {
     const priorSummary = existingSummary
       ? `Existing rolling summary:\n${existingSummary}`
       : "Existing rolling summary: none";
     const transcript = items
       .map((item) => `- ${item.type}: ${conversationItemToText(item)}`)
       .join("\n");
-    const response = await this.provider.chat({
-      systemPrompt: `${COMPACTION_SUMMARIZER_SYSTEM_PROMPT}\n\nTarget about ${this.contextBudget.targetSummaryTokens} tokens.`,
+    const userContent = `${priorSummary}\n\nNew transcript segment to fold into the rolling summary:\n${transcript}`;
+    const systemPrompt = `${COMPACTION_SUMMARIZER_SYSTEM_PROMPT}\n\nTarget about ${this.contextBudget.targetSummaryTokens} tokens.`;
+    const baseRequest: ChatParams = {
+      systemPrompt,
       conversationItems: [
-        {
-          type: "message",
-          role: "user",
-          content: `${priorSummary}\n\nNew transcript segment to fold into the rolling summary:\n${transcript}`,
-        },
+        { type: "message", role: "user", content: userContent },
       ],
-      messages: [
-        {
-          role: "user",
-          content: `${priorSummary}\n\nNew transcript segment to fold into the rolling summary:\n${transcript}`,
-        },
-      ],
+      messages: [{ role: "user", content: userContent }],
       tools: [],
-    });
-    const summary = response.content
-      .filter((block) => block.type === "text")
+    };
+
+    const first = await this.runSummarizerRequest(baseRequest);
+    if (first.kind === "summary") {
+      return {
+        kind: "summary",
+        text: first.text,
+        attempts: 1,
+        diagnostics: { firstAttempt: first.diagnostics },
+      };
+    }
+
+    // Retry once with a minimal prompt variation. The `NONE` sentinel gives
+    // the model a documented way to signal "nothing durable to add" without
+    // producing empty whitespace, and also gives transient provider quirks a
+    // chance to recover without aborting the user's run.
+    const retryRequest: ChatParams = {
+      ...baseRequest,
+      systemPrompt: `${systemPrompt}\n\nIf the previous transcript has nothing durable to summarize, reply with the literal token NONE and nothing else.`,
+    };
+    const retry = await this.runSummarizerRequest(retryRequest);
+    if (retry.kind === "summary") {
+      return {
+        kind: "summary",
+        text: retry.text,
+        attempts: 2,
+        diagnostics: {
+          firstAttempt: first.diagnostics,
+          retryAttempt: retry.diagnostics,
+        },
+      };
+    }
+
+    return {
+      kind: "empty",
+      attempts: 2,
+      diagnostics: {
+        firstAttempt: first.diagnostics,
+        retryAttempt: retry.diagnostics,
+      },
+    };
+  }
+
+  private async runSummarizerRequest(
+    request: ChatParams
+  ): Promise<CompactionSummaryAttempt> {
+    const response = await this.provider.chat(request);
+    const textBlocks = response.content.filter(
+      (block) => block.type === "text"
+    ) as Array<{ type: "text"; text: string }>;
+    const joined = textBlocks
       .map((block) => block.text.trim())
       .filter(Boolean)
       .join("\n\n");
 
-    if (!summary) {
-      throw new Error("Compaction summary model response did not include text.");
+    const diagnostics: SummarizerAttemptDiagnostics = {
+      contentBlockCount: response.content.length,
+      textBlockCount: textBlocks.length,
+      stopReason: response.stopReason,
+      providerStopReason: response.providerStopReason,
+    };
+
+    // `NONE` is the documented sentinel for "nothing durable to summarize".
+    if (joined === "NONE") {
+      return { kind: "empty", diagnostics };
     }
 
-    return summary.startsWith(COMPACTION_SUMMARY_HEADER)
-      ? summary
-      : `${COMPACTION_SUMMARY_HEADER}\n${summary}`;
+    if (!joined) {
+      return { kind: "empty", diagnostics };
+    }
+
+    const text = joined.startsWith(COMPACTION_SUMMARY_HEADER)
+      ? joined
+      : `${COMPACTION_SUMMARY_HEADER}\n${joined}`;
+
+    return { kind: "summary", text, diagnostics };
   }
 
   private buildCompactedItems(
@@ -608,16 +722,27 @@ export class AgentLoop {
     session: SessionState,
     beforeTokens: number,
     modelItems: ConversationItem[],
-    skipReason: string
+    skipReason: string,
+    extras?: {
+      attempts?: 1 | 2;
+      diagnostics?: SummarizerDiagnostics;
+    }
   ): Promise<void> {
-    await this.eventStore.append(session.id, "conversation_compaction", {
+    const data: Record<string, unknown> = {
       beforeApproximateTokens: beforeTokens,
       afterApproximateTokens: this.estimateConversationTokens(modelItems),
       summarizedMessages: 0,
       preservedRecentTokens: this.estimateConversationTokens(modelItems),
       summaryTokens: session.contextBudget?.summaryTokens ?? 0,
       skipReason,
-    });
+    };
+    if (extras?.attempts !== undefined) {
+      data.attempts = extras.attempts;
+    }
+    if (extras?.diagnostics) {
+      data.diagnostics = extras.diagnostics;
+    }
+    await this.eventStore.append(session.id, "conversation_compaction", data);
   }
 
   private findSafeCompactionSplitIndex(
