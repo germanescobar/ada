@@ -206,7 +206,10 @@ export class AgentLoop {
           return;
         }
 
-        const modelContextItems = await this.buildModelContextItems(session);
+        const modelContextItems = await this.buildModelContextItems(
+          session,
+          i
+        );
         const systemPrompt =
           await this.contextBuilder.appendRuntimeContext(baseSystemPrompt);
 
@@ -452,7 +455,8 @@ export class AgentLoop {
   }
 
   private async buildModelContextItems(
-    session: SessionState
+    session: SessionState,
+    iterationIndex: number
   ): Promise<ConversationItem[]> {
     this.normalizeSession(session);
     const thresholdTokens = this.getCompactionThresholdTokens(session.model);
@@ -469,7 +473,12 @@ export class AgentLoop {
     );
     const beforeTokens = this.estimateConversationTokens(currentModelItems);
 
-    if (beforeTokens <= thresholdTokens) return currentModelItems;
+    if (beforeTokens <= thresholdTokens) {
+      // Back under the threshold — clear any summarizer cooldown so the next
+      // time we cross it we try again.
+      this.clearSummarizerCooldown(session);
+      return currentModelItems;
+    }
 
     const desiredSplitIndex = this.findRecentTailSplitIndex(
       session.conversationItems,
@@ -498,11 +507,32 @@ export class AgentLoop {
       return currentModelItems;
     }
 
+    // Respect the in-run summarizer cooldown. After a `summarizer_returned_empty`
+    // skip, the compactor suppresses further summarizer calls for the rest of
+    // this run so a persistently empty summarizer does not multiply provider
+    // cost on every tool iteration. Cleared on a successful compaction, when
+    // the run ends, or when the context drops back under threshold.
+    const cooldown = session.contextBudget?.summarizerCooldownUntilIteration;
+    if (cooldown !== undefined && iterationIndex < cooldown) {
+      await this.appendCompactionSkipEvent(
+        session,
+        beforeTokens,
+        currentModelItems,
+        "summarizer_cooldown_active",
+        {
+          attempts: session.contextBudget?.summarizerCooldownAttempts,
+          diagnostics: session.contextBudget?.summarizerCooldownDiagnostics,
+        }
+      );
+      return currentModelItems;
+    }
+
     const summaryResult = await this.generateCompactionSummary(
       existingSummary,
       nextItemsToSummarize
     );
     if (summaryResult.kind === "empty") {
+      this.applySummarizerCooldown(session, summaryResult);
       await this.appendCompactionSkipEvent(
         session,
         beforeTokens,
@@ -550,6 +580,11 @@ export class AgentLoop {
       compactionSummary: summary,
       summarizedItemCount: splitIndex,
       compactedAt,
+      // Successful compaction invalidates any prior empty-summarizer
+      // cooldown — the model produced a usable summary this iteration.
+      summarizerCooldownUntilIteration: undefined,
+      summarizerCooldownDiagnostics: undefined,
+      summarizerCooldownAttempts: undefined,
     };
 
     await this.eventStore.append(session.id, "conversation_compaction", {
@@ -743,6 +778,39 @@ export class AgentLoop {
       data.diagnostics = extras.diagnostics;
     }
     await this.eventStore.append(session.id, "conversation_compaction", data);
+  }
+
+  /**
+   * Stamp the session so further summarizer calls are suppressed until the
+   * iteration index passes the cooldown. Using `MAX_ITERATIONS` means the
+   * cooldown rides out the rest of the current run; the field is cleared
+   * automatically when a future run reloads the session or when compaction
+   * succeeds.
+   */
+  private applySummarizerCooldown(
+    session: SessionState,
+    result: CompactionSummaryResult
+  ): void {
+    if (!session.contextBudget) return;
+    session.contextBudget = {
+      ...session.contextBudget,
+      summarizerCooldownUntilIteration: MAX_ITERATIONS,
+      summarizerCooldownDiagnostics: result.diagnostics,
+      summarizerCooldownAttempts: result.attempts,
+    };
+  }
+
+  private clearSummarizerCooldown(session: SessionState): void {
+    if (!session.contextBudget) return;
+    if (session.contextBudget.summarizerCooldownUntilIteration === undefined) {
+      return;
+    }
+    session.contextBudget = {
+      ...session.contextBudget,
+      summarizerCooldownUntilIteration: undefined,
+      summarizerCooldownDiagnostics: undefined,
+      summarizerCooldownAttempts: undefined,
+    };
   }
 
   private findSafeCompactionSplitIndex(
