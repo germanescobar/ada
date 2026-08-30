@@ -6,6 +6,16 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.2]
+
+### Fixed
+
+- Keep user runs alive when the rolling-summary compactor receives an empty
+  model response by retrying once and falling back to the uncompacted
+  transcript with diagnostic skip events.
+- Suppress repeated summarizer retries for the remainder of a run after empty
+  responses, avoiding unnecessary provider calls on later tool iterations.
+
 ## [0.5.1]
 
 ### Fixed
